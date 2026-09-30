@@ -93,6 +93,7 @@ class MainFragment : AutoCleanupPreferenceFragment() {
                 summary = "A fallback when the portal recorder cannot identify your login."
                 fragment = ManualLoginFragment::class.qualifiedName
             }
+            addLoginStatusPreference(this@MainFragment)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 addNetworkSuggestionPreferences(

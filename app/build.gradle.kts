@@ -14,7 +14,7 @@ android {
         minSdk = 26
         resourceConfigurations.addAll(listOf("en", "hi"))
         versionCode = (versionCode ?: 1) + 1
-        versionName = "$versionName-startupfix2"
+        versionName = "$versionName-college"
         //noinspection EditedTargetSdkVersion
         targetSdk = 36
         multiDexEnabled = true

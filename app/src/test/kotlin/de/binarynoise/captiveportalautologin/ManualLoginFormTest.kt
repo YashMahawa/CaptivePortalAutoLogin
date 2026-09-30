@@ -29,4 +29,18 @@ class ManualLoginFormTest {
     @Test fun `ambiguous forms are not submitted automatically`() {
         assertThrows(IllegalArgumentException::class.java) { ManualLoginForm.parse(html + html, url, url, "user", "password") }
     }
+    @Test fun `same host HTTP to HTTPS upgrade is allowed`() {
+        val configured = "http://portal.test/login".toHttpUrl()
+        val form = ManualLoginForm.parse(html, url, configured, "user", "password")
+        assertEquals("https://portal.test/auth", form.action.toString())
+    }
+    @Test fun `HTTPS to HTTP downgrade is rejected`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            ManualLoginForm.parse(html.replace("/auth", "http://portal.test/auth"), url, url, "user", "password")
+        }
+    }
+    @Test fun `relative action respects the HTML base URL`() {
+        val form = ManualLoginForm.parse("<base href='https://portal.test/college/'>" + html.replace("/auth", "auth"), url, url, "user", "password")
+        assertEquals("https://portal.test/college/auth", form.action.toString())
+    }
 }

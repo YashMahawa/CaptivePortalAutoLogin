@@ -154,16 +154,24 @@ class ExtensionDelegate(
             } else {
                 runtime.webExtensionController.ensureBuiltIn(extensionPath, extensionID)
             }.accept({ e ->
-                extension = e!!
-                log("Extension installed: ${e.id}")
-                
-                context(lifecycleOwner) {
-                    mainHandler.postIfCreated {
-                        session.webExtensionController.setMessageDelegate(e, this, "browser")
-                        e.setMessageDelegate(this, "browser")
-                        onExtensionLoaded()
-                    }
+                if (e == null) {
+                    onError(IllegalStateException("Capture extension installation returned no extension"))
+                    return@accept
                 }
+                runtime.webExtensionController.setAllowedInPrivateBrowsing(e, true).accept({ allowed ->
+                    if (allowed == null) {
+                        onError(IllegalStateException("Capture extension private mode permission was not granted"))
+                        return@accept
+                    }
+                    extension = allowed
+                    context(lifecycleOwner) {
+                        mainHandler.postIfCreated {
+                            session.webExtensionController.setMessageDelegate(allowed, this, "browser")
+                            allowed.setMessageDelegate(this, "browser")
+                            onExtensionLoaded()
+                        }
+                    }
+                }, { onError(it) })
                 
             }, { onError(it) })
         } catch (e: Exception) {
@@ -427,7 +435,7 @@ class ExtensionDelegate(
     }
     
     companion object {
-        val geckoRuntimeSettings = GeckoRuntimeSettings.Builder().apply {
+        val geckoRuntimeSettings by lazy { GeckoRuntimeSettings.Builder().apply {
             allowInsecureConnections(GeckoRuntimeSettings.ALLOW_ALL)
             preferredColorScheme(GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM)
             remoteDebuggingEnabled(BuildConfig.DEBUG)
@@ -446,10 +454,10 @@ class ExtensionDelegate(
                 }
             }
             configFilePath(configFilePath.absolutePath)
-        }.build()
+        }.build() }
         
         // TODO: move to onCreate
-        val runtime: GeckoRuntime = GeckoRuntime.create(applicationContext, geckoRuntimeSettings)
+        val runtime: GeckoRuntime by lazy { GeckoRuntime.create(applicationContext, geckoRuntimeSettings) }
 
 //        init {
 //            runtime.shutdown() // TODO: move to onDestroy

@@ -1,0 +1,8 @@
+package org.yash.hostelwifi;
+import android.content.*;import android.security.keystore.*;import android.util.Base64;import java.nio.charset.StandardCharsets;import java.security.KeyStore;import javax.crypto.*;import javax.crypto.spec.GCMParameterSpec;
+final class Config {
+ static final String PREF="hostel", KEY="hostel.portal.key"; static android.content.SharedPreferences p(Context c){return c.getSharedPreferences(PREF,0);} static String get(Context c,String k){return p(c).getString(k,"");} static void put(Context c,String k,String v){p(c).edit().putString(k,v).apply();}
+ static SecretKey key() throws Exception {KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);if(!ks.containsAlias(KEY)){KeyGenerator g=KeyGenerator.getInstance("AES","AndroidKeyStore");g.init(new KeyGenParameterSpec.Builder(KEY,KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build());g.generateKey();}return (SecretKey)ks.getKey(KEY,null);}
+ static void secret(Context c,String k,String v){try{Cipher x=Cipher.getInstance("AES/GCM/NoPadding");x.init(Cipher.ENCRYPT_MODE,key());put(c,k,Base64.encodeToString(x.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(x.doFinal(v.getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP));}catch(Exception e){throw new RuntimeException(e);}}
+ static String readSecret(Context c,String k){try{String s=get(c,k);if(s.isEmpty())return "";String[] a=s.split(":",2);Cipher x=Cipher.getInstance("AES/GCM/NoPadding");x.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(a[0],Base64.DEFAULT)));return new String(x.doFinal(Base64.decode(a[1],Base64.DEFAULT)),StandardCharsets.UTF_8);}catch(Exception e){return "";}}
+}

@@ -44,6 +44,8 @@ output.json
 *.iml
 .idea/
 .kotlin/
+__pycache__/
+*.pyc
 
 # Keystore files
 *.jks

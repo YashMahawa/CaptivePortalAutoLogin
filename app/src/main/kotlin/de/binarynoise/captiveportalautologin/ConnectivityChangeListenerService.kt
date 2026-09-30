@@ -70,6 +70,35 @@ class ConnectivityChangeListenerService : Service() {
     private var settingsObserverRegistered = false
     private val attemptLimiter = NetworkAttemptLimiter()
     @Volatile private var retryWhenNetworkAvailable = false
+    private val retryPolicy = PortalRetryPolicy()
+    private var pendingRetry: Runnable? = null
+    private var retryNetwork: Network? = null
+    @Volatile private var stopping = false
+
+    private fun automaticEnabled(ssid: String): Boolean =
+        SharedPreferences.liberator_automatically_liberate.get() || ManualPortalProfiles.load()?.automaticSsid == ssid
+
+    @Synchronized private fun cancelAutomaticRetry(reset: Boolean = true) {
+        pendingRetry?.let(backgroundHandler::removeCallbacks)
+        pendingRetry = null
+        retryNetwork = null
+        if (reset) retryPolicy.reset()
+    }
+
+    @Synchronized private fun scheduleAutomaticRetry(network: Network, delay: Long? = null) {
+        if (stopping || pendingRetry != null) return
+        val state = networkStateLock.read { networkState } ?: return
+        if (state.network != network || !state.hasPortal || !automaticEnabled(state.ssid)) return
+        val wait = delay ?: retryPolicy.nextDelayMillis()
+        val task = Runnable {
+            synchronized(this) { pendingRetry = null; retryNetwork = null }
+            tryLiberate(expectedNetwork = network)
+        }
+        pendingRetry = task
+        retryNetwork = network
+        backgroundHandler.postDelayed(task, wait)
+        LoginStatus.retryScheduled(wait)
+    }
     
     @RequiresApi(Build.VERSION_CODES.Q)
     private val nonPersistentMacRandomizationSettingsObserver = object : ContentObserver(backgroundHandler) {
@@ -217,6 +246,8 @@ class ConnectivityChangeListenerService : Service() {
     }
     
     override fun onDestroy() {
+        stopping = true
+        cancelAutomaticRetry()
         super.onDestroy()
         log("onDestroy")
         
@@ -286,6 +317,7 @@ class ConnectivityChangeListenerService : Service() {
                 log("onUnavailable: $network")
                 val oldState = networkState
                 if (oldState?.network == network) networkState = null
+                backgroundHandler.post { if (retryNetwork == network) cancelAutomaticRetry() }
             }
         }
         
@@ -300,7 +332,7 @@ class ConnectivityChangeListenerService : Service() {
         val network = tryOrDefault(network) { disablePrivateDns(network) }
         
         val ssid = SsidCompat.getSsid(network, networkCapabilities)
-        networkStateLock.write {
+        val resetRetry = networkStateLock.write {
             val oldState = networkState
             networkState = if (oldState == null || oldState.network != network) {
                 NetworkState(network, ssid ?: SsidCompat.UNKNOWN_SSID, hasPortal, false, false)
@@ -311,7 +343,9 @@ class ConnectivityChangeListenerService : Service() {
                     liberated = if (hasPortal && !oldState.hasPortal) false else oldState.liberated,
                 )
             }
+            oldState?.network != network || (hasPortal && !oldState.hasPortal)
         }
+        if (resetRetry || !hasPortal) backgroundHandler.post { cancelAutomaticRetry() }
         if (retryWhenNetworkAvailable) {
             retryWhenNetworkAvailable = false
             backgroundHandler.post { tryLiberate(force = true, expectedNetwork = network) }
@@ -319,9 +353,9 @@ class ConnectivityChangeListenerService : Service() {
         }
         if (!hasPortal) return
         
-        val liberateAutomatically: Boolean by SharedPreferences.liberator_automatically_liberate
-        if (!liberateAutomatically) {
+        if (!automaticEnabled(ssid ?: SsidCompat.UNKNOWN_SSID)) {
             log("not liberating automatically")
+            LoginStatus.record("Portal detected, but automatic login is off. Enable automatic login or saved details for this Wi-Fi.")
             return
         }
         
@@ -360,6 +394,13 @@ class ConnectivityChangeListenerService : Service() {
     
     @WorkerThread
     fun tryLiberate(force: Boolean = false, expectedNetwork: Network? = null) {
+        if (stopping) return
+        if (captureNetwork != null) {
+            LoginStatus.record("Automatic login paused while recording. Complete the login in the browser, or close it to resume.")
+            val current = networkStateLock.read { networkState?.network }
+            if (current != null) scheduleAutomaticRetry(current, 60_000)
+            return
+        }
         val (network, ssid) = networkStateLock.write {
             val state = networkState
             if (state == null) {
@@ -382,7 +423,10 @@ class ConnectivityChangeListenerService : Service() {
                 Toast.makeText(applicationContext, R.string.already_liberating, Toast.LENGTH_SHORT).show()
                 return
             }
-            if (!attemptLimiter.acquire(state.network, SystemClock.elapsedRealtime(), manual = force)) return
+            if (!attemptLimiter.acquire(state.network, SystemClock.elapsedRealtime(), manual = force)) {
+                backgroundHandler.post { scheduleAutomaticRetry(state.network, 60_000) }
+                return
+            }
             networkState = state.copy(liberating = true, liberated = false)
             state.network to state.ssid
         }
@@ -391,13 +435,21 @@ class ConnectivityChangeListenerService : Service() {
         t.show()
         
         var succeeded = false
+        LoginStatus.record(if (force) "Trying manual login on Wi-Fi…" else "Trying automatic login on Wi-Fi…")
         try {
             val userAgent: String by SharedPreferences.liberator_user_agent
             val portalTestUrl: PortalTestURL by SharedPreferences.liberator_captive_test_url
             
             val manualProfile = ManualPortalProfiles.load()
             if (manualProfile != null && (force || manualProfile.automaticSsid == ssid)) {
-                ManualPortalLogin.submit(network, manualProfile)
+                if (WifiInternetCheck.isOnline(network, userAgent)) {
+                    succeeded = true
+                    t.cancel()
+                    LoginStatus.record("Internet is already working on this Wi-Fi. No login was submitted.")
+                    reportNetworkConnectivity(network, true)
+                    return
+                }
+                ManualPortalLogin.submit(network, manualProfile, userAgent)
                 reportNetworkConnectivity(network, true)
             }
 
@@ -424,6 +476,7 @@ class ConnectivityChangeListenerService : Service() {
             when (liberationResult) {
                 Liberator.LiberationResult.NotCaught -> {
                     succeeded = true
+                    LoginStatus.record("Internet access verified on Wi-Fi.")
                     log("not caught in portal")
                     Toast.makeText(applicationContext, R.string.liberate_failed_no_portal, Toast.LENGTH_SHORT).show()
                     reportNetworkConnectivity(network, true)
@@ -431,6 +484,7 @@ class ConnectivityChangeListenerService : Service() {
                 }
                 is Liberator.LiberationResult.Success -> {
                     succeeded = true
+                    LoginStatus.record("Login succeeded. Android internet re-evaluation requested.")
                     log("broke out of the portal")
                     Toast.makeText(applicationContext, R.string.liberate_success, Toast.LENGTH_SHORT).show()
                     reportNetworkConnectivity(network, true)
@@ -446,6 +500,7 @@ class ConnectivityChangeListenerService : Service() {
                 }
                 is Liberator.LiberationResult.Error -> {
                     log("failed to liberate: ${liberationResult.message}", liberationResult.exception)
+                    LoginStatus.record("Login failed: ${liberationResult.message}")
                     Toast.makeText(
                         applicationContext,
                         getString(R.string.liberate_failed) + "${liberationResult.exception::class.simpleName} - ${liberationResult.message}",
@@ -468,6 +523,7 @@ class ConnectivityChangeListenerService : Service() {
                 }
                 is Liberator.LiberationResult.Timeout -> {
                     log("failed to liberate: timeout")
+                    LoginStatus.record("Login timed out. Check the portal URL and Wi-Fi connection.")
                     Toast.makeText(
                         applicationContext,
                         getString(R.string.liberate_failed) + getString(R.string.timeout),
@@ -478,6 +534,7 @@ class ConnectivityChangeListenerService : Service() {
                 }
                 is Liberator.LiberationResult.UnknownPortal -> {
                     log("failed to liberate: unknown portal: ${liberationResult.url}")
+                    LoginStatus.record("This portal has no supported automatic handler. Configure its exact login URL and credentials, or use the browser to inspect it.")
                     Toast.makeText(
                         applicationContext,
                         getString(R.string.liberate_failed) + getString(R.string.unknown_portal) + " " + liberationResult.url,
@@ -533,6 +590,7 @@ class ConnectivityChangeListenerService : Service() {
             t.cancel()
             log("failed to liberate", e)
             val message = e.localizedMessage ?: e.message ?: getString(R.string.no_error_message)
+            LoginStatus.record("Login failed: $message")
             Toast.makeText(
                 applicationContext,
                 getString(R.string.liberate_failed) + "${e::class.simpleName} - $message",
@@ -558,6 +616,7 @@ class ConnectivityChangeListenerService : Service() {
                     networkState = state.copy(liberating = false, liberated = succeeded)
                 }
             }
+            if (succeeded) cancelAutomaticRetry() else scheduleAutomaticRetry(network)
         }
     }
     
@@ -686,6 +745,7 @@ class ConnectivityChangeListenerService : Service() {
                 setIncludeOtherUidNetworks(true)
             }
         }.build()
+        @Volatile var captureNetwork: Network? = null
         
         fun start(silent: Boolean = false): Unit = serviceStateLock.read {
             if (serviceState.running || serviceState.restart) return

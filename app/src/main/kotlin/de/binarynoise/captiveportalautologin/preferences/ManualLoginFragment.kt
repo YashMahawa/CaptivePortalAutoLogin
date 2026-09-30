@@ -71,6 +71,7 @@ class ManualLoginFragment : AutoCleanupPreferenceFragment() {
         preferenceScreen.addPreference(automatic)
         fun save(): Boolean = try {
             val parsed = url.text?.trim()?.toHttpUrlOrNull() ?: error("Enter a valid http(s) portal URL")
+            require(parsed.username.isEmpty() && parsed.password.isEmpty()) { "Put credentials in the username and password fields, not the URL" }
             require(!username.text.isNullOrEmpty() && !password.text.isNullOrEmpty()) { "Enter username and password" }
             val ssid = if (automatic.isChecked) ConnectivityChangeListenerService.networkStateLock.read {
                 ConnectivityChangeListenerService.networkState?.ssid?.takeUnless { it == ConnectivityChangeListenerService.SsidCompat.UNKNOWN_SSID }
@@ -96,5 +97,6 @@ class ManualLoginFragment : AutoCleanupPreferenceFragment() {
             title = "Forget saved details"
             setOnPreferenceClickListener { ManualPortalProfiles.clear(); password.text = ""; password.summary = "Not set"; automatic.isChecked = false; true }
         })
+        preferenceScreen.addLoginStatusPreference(this)
     }
 }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Hostel Wi-Fi captive login helper
+After=NetworkManager.service
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.local/share/hostel-wifi/hostel_wifi.py watch
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

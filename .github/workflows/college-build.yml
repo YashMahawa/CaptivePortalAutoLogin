@@ -1,0 +1,99 @@
+name: College APK and Linux build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: college-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'YashMahawa/CaptivePortalAutoLogin'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+      - name: Restore durable signing key
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os, base64
+          from pathlib import Path
+          key = Path(os.environ['RUNNER_TEMP']) / 'college-release.jks'
+          key.write_bytes(base64.b64decode(os.environ['KEYSTORE']))
+          key.chmod(0o600)
+          props = Path('keystore.properties')
+          props.write_text(f'storeFile={key}\nstorePassword={os.environ["STORE_PASSWORD"]}\nkeyAlias={os.environ["KEY_ALIAS"]}\nkeyPassword={os.environ["KEY_PASSWORD"]}\n')
+          props.chmod(0o600)
+          PY
+      - name: Test and build
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testArm64ReleaseUnitTest :app:assembleArm64Release :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
+      - name: Package downloads
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/arm64/release/app-arm64-release.apk dist/CaptivePortalAutoLogin-arm64-v8a.apk
+          python3 scripts/package-linux.py dist/CaptivePortalAutoLogin-Linux.zip
+          sha256sum dist/* > dist/SHA256SUMS.txt
+      - name: Upload downloads
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: college-downloads
+          path: dist/*
+          retention-days: 90
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/testArm64ReleaseUnitTest/
+          if-no-files-found: ignore
+      - name: Remove signing files
+        if: always()
+        run: rm -f keystore.properties "$RUNNER_TEMP/college-release.jks"
+
+  release:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: college-downloads
+          path: dist
+      - name: Publish durable test-build downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_TAG: build-${{ github.run_number }}-${{ github.run_attempt }}
+          BUILD_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf 'Source commit: %s\n\nBuild and unit-test results: %s\n\nAndroid arm64 APK and Linux CLI ZIP. These are test builds; successful compilation and unit tests do not verify a particular college portal.\n' "$BUILD_SHA" "$RUN_URL" > release-notes.txt
+          gh release create "$BUILD_TAG" dist/* --target "$BUILD_SHA" --prerelease --title "College test build $BUILD_TAG" --notes-file release-notes.txt

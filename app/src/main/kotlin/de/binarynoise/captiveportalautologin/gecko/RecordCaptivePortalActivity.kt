@@ -29,6 +29,8 @@ import de.binarynoise.captiveportalautologin.ConnectivityChangeListenerService.C
 import de.binarynoise.captiveportalautologin.ConnectivityChangeListenerService.Companion.networkState
 import de.binarynoise.captiveportalautologin.ConnectivityChangeListenerService.Companion.networkStateLock
 import de.binarynoise.captiveportalautologin.R
+import de.binarynoise.captiveportalautologin.LoginStatus
+import de.binarynoise.captiveportalautologin.ManualPortalProfiles
 import de.binarynoise.captiveportalautologin.ScheduledApiClient
 import de.binarynoise.captiveportalautologin.api.json.har.HAR
 import de.binarynoise.captiveportalautologin.databinding.ActivityRecordCaptivePortalBinding
@@ -39,7 +41,6 @@ import de.binarynoise.liberator.PortalTestURL
 import de.binarynoise.liberator.tryOrIgnore
 import de.binarynoise.liberator.tryOrLog
 import de.binarynoise.logger.Logger.log
-import de.binarynoise.reflection.getHiddenStaticFieldValue
 import de.binarynoise.reflection.invokeHiddenMethod
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.mozilla.geckoview.GeckoSession
@@ -56,6 +57,9 @@ class RecordCaptivePortalActivity : ComponentActivity() {
     var networkHasPortal = false
     private var previousBoundNetwork: Network? = null
     private var boundCaptureNetwork = false
+    private var callbackRegistered = false
+    private var browserStarted = false
+    private val completion = RecorderCompletion()
     
     private val navigationDelegate = object : GeckoSession.NavigationDelegate {
         var location: String? = null
@@ -76,14 +80,19 @@ class RecordCaptivePortalActivity : ComponentActivity() {
         }
     }
     
-    val extensionDelegate =
+    val extensionDelegate by lazy {
         ExtensionDelegate(backgroundHandler, this, navigationDelegate, ::onExtensionLoaded, ::onExtensionDelegateError)
+    }
     
     val progressDelegate = object : GeckoSession.ProgressDelegate {
         override fun onPageStop(session: GeckoSession, success: Boolean) {
             log("onPageStop")
             binding.swipeRefresh.isRefreshing = false
             binding.progress.isVisible = false
+            if (success) {
+                completion.pageLoaded()
+                checkCompletion()
+            }
         }
         
         override fun onProgressChange(session: GeckoSession, progress: Int) {
@@ -126,12 +135,16 @@ class RecordCaptivePortalActivity : ComponentActivity() {
             return
         }
         log("network = $network")
+        ConnectivityChangeListenerService.captureNetwork = network
+        connectivityManager.getNetworkCapabilities(network)?.let {
+            completion.capabilities(it.hasCapability(NET_CAPABILITY_CAPTIVE_PORTAL), it.hasCapability(NET_CAPABILITY_VALIDATED))
+        }
         previousBoundNetwork = connectivityManager.boundNetworkForProcess
         boundCaptureNetwork = connectivityManager.bindProcessToNetwork(network)
         
         if (SharedPreferences.liberator_user_agent.get() == SystemPortalUserAgent) {
             val userAgent = intent.getStringExtra(
-                ConnectivityManager::class.java.getHiddenStaticFieldValue("EXTRA_CAPTIVE_PORTAL_USER_AGENT") as String
+                "android.net.extra.CAPTIVE_PORTAL_USER_AGENT"
             )
             if (userAgent != null) extensionDelegate.session.settings.userAgentOverride = userAgent
         }
@@ -144,12 +157,20 @@ class RecordCaptivePortalActivity : ComponentActivity() {
         }
         
         connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
+        callbackRegistered = true
         
         onBackPressedDispatcher.addCallback(onBackPressedCallback)
         
-        extensionDelegate.onCreate(binding.geckoView)
         extensionDelegate.session.progressDelegate = progressDelegate
         extensionDelegate.session.scrollDelegate = scrollRefreshDelegate
+        try {
+            extensionDelegate.onCreate(binding.geckoView)
+            browserStarted = true
+        } catch (e: Exception) {
+            onExtensionDelegateError(e)
+        } catch (e: LinkageError) {
+            onExtensionDelegateError(e)
+        }
         binding.swipeRefresh.setOnRefreshListener {
             reevaluateNetwork()
             extensionDelegate.session.reload()
@@ -174,8 +195,10 @@ class RecordCaptivePortalActivity : ComponentActivity() {
             if (changedNetwork != network) return
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                if (networkCapabilities.hasCapability(NET_CAPABILITY_CAPTIVE_PORTAL)) networkHasPortal = true
-                if (networkCapabilities.hasCapability(NET_CAPABILITY_VALIDATED)) success()
+                val hasPortal = networkCapabilities.hasCapability(NET_CAPABILITY_CAPTIVE_PORTAL)
+                if (hasPortal) networkHasPortal = true
+                completion.capabilities(hasPortal, networkCapabilities.hasCapability(NET_CAPABILITY_VALIDATED))
+                checkCompletion()
             }
         }
     }
@@ -187,23 +210,43 @@ class RecordCaptivePortalActivity : ComponentActivity() {
     }
     
     fun onExtensionLoaded() {
-        extensionDelegate.session.loadUri(portalTestUrl.httpUrl.toString())
+        extensionDelegate.session.loadUri(ManualPortalProfiles.load()?.url ?: portalTestUrl.httpUrl.toString())
         binding.swipeRefresh.isEnabled = true
+        LoginStatus.record("Recorder ready. Complete the login in the browser; capture is for diagnosing this portal, not automatic macro replay.")
     }
     
     fun onExtensionDelegateError(exception: Throwable?) {
-        Toast.makeText(this, getString(R.string.exception_occurred) + exception, Toast.LENGTH_LONG).show()
-        finishAndRemoveTask()
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            val message = "Recorder could not start: ${exception?.message ?: "unknown browser error"}"
+            LoginStatus.record(message)
+            AlertDialog.Builder(this).setTitle("Recorder unavailable").setMessage(message)
+                .setPositiveButton(android.R.string.ok) { _, _ -> finish() }.show()
+        }
+    }
+
+    private fun checkCompletion() {
+        if (completion.consumeCompletion()) {
+            networkHasPortal = true
+            success()
+        }
     }
     
     override fun onDestroy() {
-        extensionDelegate.session.scrollDelegate = null
-        extensionDelegate.onDestroy(binding.geckoView)
+        if (browserStarted) {
+            runCatching {
+                extensionDelegate.session.scrollDelegate = null
+                extensionDelegate.onDestroy(binding.geckoView)
+            }.onFailure { log("Recorder cleanup failed", it) }
+        }
         backgroundHandler.looper.quit()
         tryOrIgnore {
-            connectivityManager.unregisterNetworkCallback(networkCallback)
+            if (callbackRegistered) connectivityManager.unregisterNetworkCallback(networkCallback)
         }
-        if (boundCaptureNetwork && connectivityManager.boundNetworkForProcess == network) {
+        if (::network.isInitialized && ConnectivityChangeListenerService.captureNetwork == network) {
+            ConnectivityChangeListenerService.captureNetwork = null
+        }
+        if (::network.isInitialized && boundCaptureNetwork && connectivityManager.boundNetworkForProcess == network) {
             val previous = previousBoundNetwork?.takeIf { connectivityManager.getNetworkCapabilities(it) != null }
             connectivityManager.bindProcessToNetwork(previous)
         }
@@ -233,7 +276,7 @@ class RecordCaptivePortalActivity : ComponentActivity() {
     }
     
     fun success() {
-        if (!networkHasPortal) return dismiss()
+        if (!networkHasPortal) return
         if (done) return
         done = true
         AlertDialog.Builder(this)

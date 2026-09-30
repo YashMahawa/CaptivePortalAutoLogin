@@ -1,6 +1,8 @@
 package de.binarynoise.captiveportalautologin
 
 import android.os.Build
+import android.content.Context
+import de.binarynoise.logger.initializeAndroidLogger
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import de.binarynoise.captiveportalautologin.preferences.SharedPreferences
@@ -8,6 +10,12 @@ import de.binarynoise.logger.Logger
 
 open class Application : android.app.Application() {
     
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        de.binarynoise.captiveportalautologin.util.applicationContext = this
+        initializeAndroidLogger(this)
+    }
+
     override fun onCreate() {
         super.onCreate()
         

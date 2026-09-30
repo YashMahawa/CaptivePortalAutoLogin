@@ -88,6 +88,12 @@ class MainFragment : AutoCleanupPreferenceFragment() {
             }
             
             
+            addPreference(Preference(ctx), lifecycle) {
+                title = "Manual login · saved URL and credentials"
+                summary = "A fallback when the portal recorder cannot identify your login."
+                fragment = ManualLoginFragment::class.qualifiedName
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 addNetworkSuggestionPreferences(
                     this,

@@ -31,6 +31,7 @@ import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import androidx.annotation.GuardedBy
@@ -65,6 +66,10 @@ class ConnectivityChangeListenerService : Service() {
     private var notification: Notification? = null
     private val notificationId = 1
     private val channelId = "ConnectivityChangeListenerService"
+    private var networkCallbackRegistered = false
+    private var settingsObserverRegistered = false
+    private val attemptLimiter = NetworkAttemptLimiter()
+    @Volatile private var retryWhenNetworkAvailable = false
     
     @RequiresApi(Build.VERSION_CODES.Q)
     private val nonPersistentMacRandomizationSettingsObserver = object : ContentObserver(backgroundHandler) {
@@ -164,12 +169,15 @@ class ConnectivityChangeListenerService : Service() {
             return START_NOT_STICKY
         }
         
+        retryWhenNetworkAvailable = intent?.getBooleanExtra("retry", false) == true
         networkListeners.add(::bindNetworkToProcess)
         networkListeners.add(::updateNotification)
         connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
+        networkCallbackRegistered = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val uri = Settings.Global.getUriFor(SETTINGS_NON_PERSISTENT_MAC_RANDOMIZATION_FORCE_ENABLED_KEY)
             contentResolver.registerContentObserver(uri, false, nonPersistentMacRandomizationSettingsObserver)
+            settingsObserverRegistered = true
             updateNetworkSuggestions(onAppDisallowedCallback = { SharedPreferences.network_suggestions.set(false) })
         }
         
@@ -215,8 +223,11 @@ class ConnectivityChangeListenerService : Service() {
         serviceStateLock.write {
             serviceState = serviceState.copy(running = false)
             
-            connectivityManager.unregisterNetworkCallback(networkCallback)
-            networkState = null
+            if (networkCallbackRegistered) {
+                connectivityManager.unregisterNetworkCallback(networkCallback)
+                networkCallbackRegistered = false
+            }
+            networkStateLock.write { networkState = null }
             networkListeners.remove(::bindNetworkToProcess)
             networkListeners.remove(::updateNotification)
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -246,7 +257,10 @@ class ConnectivityChangeListenerService : Service() {
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             removeNetworkSuggestions()
-            contentResolver.unregisterContentObserver(nonPersistentMacRandomizationSettingsObserver)
+            if (settingsObserverRegistered) {
+                contentResolver.unregisterContentObserver(nonPersistentMacRandomizationSettingsObserver)
+                settingsObserverRegistered = false
+            }
         }
     }
     
@@ -285,21 +299,23 @@ class ConnectivityChangeListenerService : Service() {
         val hasPortal = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
         val network = tryOrDefault(network) { disablePrivateDns(network) }
         
-        val oldState = networkStateLock.read { networkState }
-        if (oldState == null) {
-            val ssid = SsidCompat.getSsid(network, networkCapabilities)
-            log("SSID: $ssid")
-            if (ssid == null) {
-                return
+        val ssid = SsidCompat.getSsid(network, networkCapabilities)
+        networkStateLock.write {
+            val oldState = networkState
+            networkState = if (oldState == null || oldState.network != network) {
+                NetworkState(network, ssid ?: SsidCompat.UNKNOWN_SSID, hasPortal, false, false)
+            } else {
+                oldState.copy(
+                    ssid = ssid ?: oldState.ssid,
+                    hasPortal = hasPortal,
+                    liberated = if (hasPortal && !oldState.hasPortal) false else oldState.liberated,
+                )
             }
-            
-            networkStateLock.write {
-                networkState = NetworkState(network, ssid, hasPortal, liberating = false, liberated = false)
-            }
-        } else {
-            networkStateLock.write {
-                networkState = oldState.copy(hasPortal = hasPortal)
-            }
+        }
+        if (retryWhenNetworkAvailable) {
+            retryWhenNetworkAvailable = false
+            backgroundHandler.post { tryLiberate(force = true, expectedNetwork = network) }
+            return
         }
         if (!hasPortal) return
         
@@ -309,7 +325,7 @@ class ConnectivityChangeListenerService : Service() {
             return
         }
         
-        backgroundHandler.post(::tryLiberate)
+        backgroundHandler.post { tryLiberate(expectedNetwork = network) }
     }
     
     private val setPrivateDnsBypassMethodP by lazy {
@@ -343,7 +359,7 @@ class ConnectivityChangeListenerService : Service() {
     }
     
     @WorkerThread
-    fun tryLiberate() {
+    fun tryLiberate(force: Boolean = false, expectedNetwork: Network? = null) {
         val (network, ssid) = networkStateLock.write {
             val state = networkState
             if (state == null) {
@@ -351,12 +367,13 @@ class ConnectivityChangeListenerService : Service() {
                 Toast.makeText(applicationContext, R.string.not_connected, Toast.LENGTH_SHORT).show()
                 return
             }
-            if (!state.hasPortal) {
+            if (expectedNetwork != null && state.network != expectedNetwork) return
+            if (!force && !state.hasPortal) {
                 log("no portal")
                 Toast.makeText(applicationContext, R.string.not_in_portal, Toast.LENGTH_SHORT).show()
                 return
             }
-            if (state.liberated) {
+            if (!force && state.liberated) {
                 log("already liberated")
                 return
             }
@@ -365,39 +382,55 @@ class ConnectivityChangeListenerService : Service() {
                 Toast.makeText(applicationContext, R.string.already_liberating, Toast.LENGTH_SHORT).show()
                 return
             }
-            networkState = state.copy(liberating = true)
+            if (!attemptLimiter.acquire(state.network, SystemClock.elapsedRealtime(), manual = force)) return
+            networkState = state.copy(liberating = true, liberated = false)
             state.network to state.ssid
         }
         
         val t = Toast.makeText(applicationContext, R.string.liberating, Toast.LENGTH_SHORT)
         t.show()
         
+        var succeeded = false
         try {
             val userAgent: String by SharedPreferences.liberator_user_agent
             val portalTestUrl: PortalTestURL by SharedPreferences.liberator_captive_test_url
             
+            val manualProfile = ManualPortalProfiles.load()
+            if (manualProfile != null && (force || manualProfile.automaticSsid == ssid)) {
+                ManualPortalLogin.submit(network, manualProfile)
+                reportNetworkConnectivity(network, true)
+            }
+
             val liberationResult = Liberator(
-                { okhttpClient -> okhttpClient.socketFactory(network.socketFactory) },
+                { okhttpClient ->
+                    okhttpClient.socketFactory(network.socketFactory)
+                    okhttpClient.dns { hostname -> network.getAllByName(hostname).toList() }
+                },
                 portalTestUrl,
                 userAgent,
                 ssid,
                 experimental = SharedPreferences.liberator_experimental_enabled,
                 appVersion = BuildConfig.VERSION_NAME,
                 liberatorVersion = "",
-                requestSystemReevaluation = { reportNetworkConnectivity(hasConnectivity = true) },
-                isSystemLiberated = { networkStateLock.read { networkState?.hasPortal?.let { !it } } ?: false },
+                requestSystemReevaluation = { reportNetworkConnectivity(network, true) },
+                isSystemLiberated = {
+                    connectivityManager.getNetworkCapabilities(network)
+                        ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+                },
             ).liberate()
             
             t.cancel()
             
             when (liberationResult) {
                 Liberator.LiberationResult.NotCaught -> {
+                    succeeded = true
                     log("not caught in portal")
                     Toast.makeText(applicationContext, R.string.liberate_failed_no_portal, Toast.LENGTH_SHORT).show()
                     reportNetworkConnectivity(network, true)
                     // no report
                 }
                 is Liberator.LiberationResult.Success -> {
+                    succeeded = true
                     log("broke out of the portal")
                     Toast.makeText(applicationContext, R.string.liberate_success, Toast.LENGTH_SHORT).show()
                     reportNetworkConnectivity(network, true)
@@ -520,7 +553,10 @@ class ConnectivityChangeListenerService : Service() {
             )
         } finally {
             networkStateLock.write {
-                networkState = networkState?.copy(liberating = false, liberated = true)
+                val state = networkState
+                if (state?.network == network) {
+                    networkState = state.copy(liberating = false, liberated = succeeded)
+                }
             }
         }
     }
@@ -532,7 +568,7 @@ class ConnectivityChangeListenerService : Service() {
             networkStateLock.write {
                 networkState = networkState?.copy(liberated = false)
             }
-            backgroundHandler.post(::tryLiberate)
+            backgroundHandler.post { tryLiberate(force = true, expectedNetwork = network) }
         } else {
             Toast.makeText(this, R.string.not_connected_to_network, Toast.LENGTH_SHORT).show()
         }
@@ -703,9 +739,9 @@ class ConnectivityChangeListenerService : Service() {
             network: Network? = null,
             hasConnectivity: Boolean? = null,
         ) {
-            val networkState = networkStateLock.read { networkState } ?: return
-            val network = network ?: networkState.network
-            val hasConnectivity = hasConnectivity ?: networkState.hasPortal
+            val state = networkStateLock.read { networkState }
+            val network = network ?: state?.network ?: return
+            val hasConnectivity = hasConnectivity ?: state?.hasPortal ?: true
             connectivityManager.reportNetworkConnectivity(network, hasConnectivity)
             log("sent network report for $network hasConnectivity=$hasConnectivity")
             Toast.makeText(applicationContext, R.string.requested_reevaluation, Toast.LENGTH_SHORT).show()

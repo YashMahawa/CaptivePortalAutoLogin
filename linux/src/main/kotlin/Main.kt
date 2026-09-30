@@ -17,6 +17,7 @@ import okhttp3.ConnectionPool
 fun main(args: Array<String>) = CaptivePortalAutoLoginLinux().main(args)
 
 class CaptivePortalAutoLoginLinux : CliktCommand() {
+    val service by option().flag().help { "Keep monitoring NetworkManager (the default)" }
     val oneshot by option().flag().help { "Run as a service (false) or only once (true)" }
     val force by option().flag()
         .help { "Force liberation without connectivity check by NetworkManager (implies --oneshot)" }
@@ -25,6 +26,7 @@ class CaptivePortalAutoLoginLinux : CliktCommand() {
         .help { "Restart networking on start. Also available as keyboard shortcut 'r' while running as service" }
     
     override fun run() {
+        require(!(service && oneshot)) { "Use either --service or --oneshot" }
         log("CaptivePortalAutoLogin for Linux")
         log("https://github.com/binarynoise/CaptivePortalAutoLogin")
         

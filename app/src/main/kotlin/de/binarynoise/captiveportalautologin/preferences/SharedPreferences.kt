@@ -13,27 +13,24 @@ import de.binarynoise.captiveportalautologin.BuildConfig
 import de.binarynoise.captiveportalautologin.util.applicationContext
 import de.binarynoise.liberator.PortalDetection
 import de.binarynoise.liberator.PortalTestURL
-import de.binarynoise.reflection.getHiddenStaticFieldValue
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
+private fun systemPortalSetting(key: String): String? = runCatching {
+    Settings.Global.getString(applicationContext.contentResolver, key)
+}.getOrNull()
+
 val SystemPortalTestUrl = PortalTestURL(
-    httpUrl = Settings.Global.getString(
-        applicationContext.contentResolver,
-        Settings.Global::class.java.getHiddenStaticFieldValue("CAPTIVE_PORTAL_HTTP_URL") as String,
-    )?.toHttpUrlOrNull() ?: PortalDetection.backends["Google"]?.httpUrl ?: PortalDetection.defaultBackend.httpUrl,
-    httpsUrl = Settings.Global.getString(
-        applicationContext.contentResolver,
-        Settings.Global::class.java.getHiddenStaticFieldValue("CAPTIVE_PORTAL_HTTPS_URL") as String,
-    )?.toHttpUrlOrNull() ?: PortalDetection.backends["Google"]?.httpsUrl ?: PortalDetection.defaultBackend.httpsUrl,
+    httpUrl = systemPortalSetting("captive_portal_http_url")?.toHttpUrlOrNull()
+        ?: PortalDetection.backends["Google"]?.httpUrl ?: PortalDetection.defaultBackend.httpUrl,
+    httpsUrl = systemPortalSetting("captive_portal_https_url")?.toHttpUrlOrNull()
+        ?: PortalDetection.backends["Google"]?.httpsUrl ?: PortalDetection.defaultBackend.httpsUrl,
 )
 val PortalDetection.backendsAndroid: Map<String, PortalTestURL>
     get() = mapOf("System" to SystemPortalTestUrl) + PortalDetection.backends
 
-val SystemPortalUserAgent = Settings.Global.getString(
-    applicationContext.contentResolver,
-    Settings.Global::class.java.getHiddenStaticFieldValue("CAPTIVE_PORTAL_USER_AGENT") as String,
-) ?: PortalDetection.userAgents["AOSP"] ?: PortalDetection.defaultUserAgent
+val SystemPortalUserAgent = systemPortalSetting("captive_portal_user_agent")
+    ?: PortalDetection.userAgents["AOSP"] ?: PortalDetection.defaultUserAgent
 val PortalDetection.userAgentsAndroid: Map<String, String>
     get() = mapOf("System" to SystemPortalUserAgent) + PortalDetection.userAgents
 

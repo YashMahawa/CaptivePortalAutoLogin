@@ -12,6 +12,9 @@ android {
     
     defaultConfig {
         minSdk = 26
+        resourceConfigurations.addAll(listOf("en", "hi"))
+        versionCode = (versionCode ?: 1) + 1
+        versionName = "$versionName-startupfix2"
         //noinspection EditedTargetSdkVersion
         targetSdk = 36
         multiDexEnabled = true
@@ -114,6 +117,7 @@ dependencies {
     }
     
     implementation(libs.okhttp)
+    implementation(libs.jsoup)
     implementation(libs.okhttp.urlconnection)
     
     compileOnly(libs.xposed.api)

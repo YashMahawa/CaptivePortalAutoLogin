@@ -15,9 +15,7 @@ import androidx.annotation.AttrRes
 import androidx.annotation.ColorInt
 import de.binarynoise.reflection.invokeHiddenMethod
 
-@SuppressLint("PrivateApi")
-internal var applicationContext: Application =
-    Class.forName("android.app.ActivityThread").getMethod("currentApplication").invoke(null) as Application
+internal lateinit var applicationContext: Application
 
 @JvmName("startActivityClass")
 inline fun <reified T> Context.startActivity(setup: Intent.() -> Unit = {}) {

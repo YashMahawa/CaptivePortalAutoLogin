@@ -54,6 +54,8 @@ class RecordCaptivePortalActivity : ComponentActivity() {
     var captivePortal: CaptivePortal? = null
     lateinit var network: Network
     var networkHasPortal = false
+    private var previousBoundNetwork: Network? = null
+    private var boundCaptureNetwork = false
     
     private val navigationDelegate = object : GeckoSession.NavigationDelegate {
         var location: String? = null
@@ -124,6 +126,8 @@ class RecordCaptivePortalActivity : ComponentActivity() {
             return
         }
         log("network = $network")
+        previousBoundNetwork = connectivityManager.boundNetworkForProcess
+        boundCaptureNetwork = connectivityManager.bindProcessToNetwork(network)
         
         if (SharedPreferences.liberator_user_agent.get() == SystemPortalUserAgent) {
             val userAgent = intent.getStringExtra(
@@ -163,13 +167,16 @@ class RecordCaptivePortalActivity : ComponentActivity() {
     val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onLost(lostNetwork: Network) {
             if (lostNetwork != network) return
-            finishAndRemoveTask()
+            runOnUiThread { finishAndRemoveTask() }
         }
         
         override fun onCapabilitiesChanged(changedNetwork: Network, networkCapabilities: NetworkCapabilities) {
             if (changedNetwork != network) return
-            if (networkCapabilities.hasCapability(NET_CAPABILITY_CAPTIVE_PORTAL)) networkHasPortal = true
-            if (networkCapabilities.hasCapability(NET_CAPABILITY_VALIDATED)) return success()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (networkCapabilities.hasCapability(NET_CAPABILITY_CAPTIVE_PORTAL)) networkHasPortal = true
+                if (networkCapabilities.hasCapability(NET_CAPABILITY_VALIDATED)) success()
+            }
         }
     }
     
@@ -195,6 +202,10 @@ class RecordCaptivePortalActivity : ComponentActivity() {
         backgroundHandler.looper.quit()
         tryOrIgnore {
             connectivityManager.unregisterNetworkCallback(networkCallback)
+        }
+        if (boundCaptureNetwork && connectivityManager.boundNetworkForProcess == network) {
+            val previous = previousBoundNetwork?.takeIf { connectivityManager.getNetworkCapabilities(it) != null }
+            connectivityManager.bindProcessToNetwork(previous)
         }
         super.onDestroy()
     }

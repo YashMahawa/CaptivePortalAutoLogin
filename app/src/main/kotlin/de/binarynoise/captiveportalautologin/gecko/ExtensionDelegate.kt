@@ -153,15 +153,15 @@ class ExtensionDelegate(
                 runtime.webExtensionController.installBuiltIn(extensionPath)
             } else {
                 runtime.webExtensionController.ensureBuiltIn(extensionPath, extensionID)
-            }.accept({ e ->
+            }.accept(installed@{ e ->
                 if (e == null) {
                     onError(IllegalStateException("Capture extension installation returned no extension"))
-                    return@accept
+                    return@installed
                 }
-                runtime.webExtensionController.setAllowedInPrivateBrowsing(e, true).accept({ allowed ->
+                runtime.webExtensionController.setAllowedInPrivateBrowsing(e, true).accept(allowed@{ allowed ->
                     if (allowed == null) {
                         onError(IllegalStateException("Capture extension private mode permission was not granted"))
-                        return@accept
+                        return@allowed
                     }
                     extension = allowed
                     context(lifecycleOwner) {

@@ -343,7 +343,7 @@ class ConnectivityChangeListenerService : Service() {
                     liberated = if (hasPortal && !oldState.hasPortal) false else oldState.liberated,
                 )
             }
-            oldState?.network != network || (hasPortal && !oldState.hasPortal)
+            oldState == null || oldState.network != network || (hasPortal && !oldState.hasPortal)
         }
         if (resetRetry || !hasPortal) backgroundHandler.post { cancelAutomaticRetry() }
         if (retryWhenNetworkAvailable) {

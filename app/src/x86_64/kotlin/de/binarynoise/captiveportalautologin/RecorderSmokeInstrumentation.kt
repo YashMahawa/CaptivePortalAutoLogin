@@ -19,17 +19,29 @@ import de.binarynoise.captiveportalautologin.gecko.RecordCaptivePortalActivity
 import de.binarynoise.captiveportalautologin.preferences.MainActivity
 import de.binarynoise.captiveportalautologin.preferences.SystemPortalTestUrl
 import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.WebRequestError
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /** Exercises the real release browser and HTTP client against a local, synthetic portal. */
 class RecorderSmokeInstrumentation : Instrumentation() {
     private val loaded = CountDownLatch(1)
+    private val errorVisible = CountDownLatch(1)
+    @Volatile private var errorPage: String? = null
     private val portalUrl = "http://10.0.2.2:8765/login"
 
     override fun callActivityOnCreate(activity: Activity, state: Bundle?) {
         super.callActivityOnCreate(activity, state)
         if (activity is RecordCaptivePortalActivity) {
+            val navigation = checkNotNull(activity.extensionDelegate.session.navigationDelegate)
+            activity.extensionDelegate.session.navigationDelegate = object : GeckoSession.NavigationDelegate by navigation {
+                override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String>? {
+                    val result = navigation.onLoadError(session, uri, error)
+                    result?.accept { page -> errorPage = page; errorVisible.countDown() }
+                    return result
+                }
+            }
             activity.extensionDelegate.session.progressDelegate = object : GeckoSession.ProgressDelegate {
                 private var fixture = false
                 override fun onPageStart(session: GeckoSession, url: String) {
@@ -95,6 +107,11 @@ class RecorderSmokeInstrumentation : Instrumentation() {
                 }
             })
             check(captured.await(20, TimeUnit.SECONDS)) { "Private browser extension did not capture the page request" }
+            runOnMainSync { recorder.extensionDelegate.session.loadUri("http://10.0.2.2:1/unavailable") }
+            check(errorVisible.await(25, TimeUnit.SECONDS)) { "Recorder silently ignored a failed page load" }
+            check(errorPage?.startsWith("data:text/html") == true && errorPage?.contains("Portal%20load%20failed") == true) {
+                "Recorder did not supply a visible retry page"
+            }
             runOnMainSync { recorder.finish() }
             waitForIdleSync()
             ManualPortalLogin.submit(network, profile, "CaptivePortalSmokeTest")

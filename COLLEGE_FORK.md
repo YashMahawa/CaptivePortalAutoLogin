@@ -6,7 +6,7 @@ The original settings interface and Gecko recorder are retained. The previous de
 
 ## Builds and signing
 
-Every push to `main` runs Android unit tests and builds a release arm64-v8a APK plus a separate Linux CLI ZIP on a GitHub-hosted runner. Publication also requires an Android 16 emulator check that loads a synthetic portal in the actual Gecko recorder, verifies traffic capture, round-trips encrypted credentials and submits a fresh login form with cookies, Origin and Referer. The smoke runner exists only in the emulator APK, not the delivered arm64 APK. Successful builds publish test-build releases with SHA256 checksums. Pull requests build and test without access to the release signing secrets.
+Every push to `main` runs Android unit tests and builds a release arm64-v8a APK plus a separate Linux CLI ZIP on a GitHub-hosted runner. Publication also requires an Android 15 and 16 emulator checks that loads a synthetic portal in the actual Gecko recorder, verifies traffic capture, round-trips encrypted credentials and submits a fresh login form with cookies, Origin and Referer. The smoke runner exists only in the emulator APK, not the delivered arm64 APK. Successful builds publish test-build releases with SHA256 checksums. Pull requests build and test without access to the release signing secrets.
 
 The signing keystore and its passwords are GitHub Actions repository secrets. The GitHub personal access token is never committed and is not supplied to Actions. Actions uses its short-lived `GITHUB_TOKEN` for release publication.
 
@@ -26,3 +26,7 @@ The UI keeps the original settings appearance. Fragment text no longer cross-fad
 - Upstream Capture records HAR traffic for diagnosing a portal. It does not generate or replay a login macro. A particular college portal cannot be claimed supported without its URL, form behavior and an actual login test. Never send a password in an issue or commit a HAR containing credentials.
 
 The Linux ZIP contains the original Java CLI. It does not include the Android credential editor or Gecko recorder.
+
+## Installer compatibility investigation
+
+The Vivo T2 5G on Android 15 rejected build 12 even with a separate package name. The full installer error is still needed; signature and ELF validation did not reproduce this phone-specific rejection. Releases now explicitly include v1/v2/v3 signatures using the same durable key. A larger optional `-direct.apk` stores aligned native libraries uncompressed with `extractNativeLibs=false`, so installation does not need to extract Gecko’s compressed libraries. The usual APK remains compressed. CI exercises installation/update, recorder and manual login for both packaging formats on Android 15 and 16. These changes are compatibility probes, not proof that the Vivo issue is fixed.

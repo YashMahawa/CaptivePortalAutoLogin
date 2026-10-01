@@ -65,6 +65,13 @@ jobs:
           mkdir -p dist
           cp app/build/outputs/apk/arm64/release/app-arm64-release.apk dist/CaptivePortalAutoLogin-arm64-v8a.apk
           python3 scripts/package-linux.py dist/CaptivePortalAutoLogin-Linux.zip
+          cp app/build/outputs/apk/x86_64/release/app-x86_64-release.apk smoke-fixture/app-x86_64-release.apk
+      - name: Build and validate direct native-library alternatives
+        run: |
+          ./gradlew :app:assembleArm64Release :app:assembleX86_64Release -PdirectNativeLibraries=true --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
+          python3 scripts/verify-arm64-apk.py app/build/outputs/apk/arm64/release/app-arm64-release.apk --direct ${{ github.event_name != 'pull_request' && '--release' || '' }}
+          cp app/build/outputs/apk/arm64/release/app-arm64-release.apk dist/CaptivePortalAutoLogin-arm64-v8a-direct.apk
+          cp app/build/outputs/apk/x86_64/release/app-x86_64-release.apk smoke-fixture/app-x86_64-direct.apk
           sha256sum dist/* > dist/SHA256SUMS.txt
       - name: Upload downloads
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -84,14 +91,17 @@ jobs:
         with:
           name: emulator-apks
           path: |
-            app/build/outputs/apk/x86_64/release/*.apk
-            smoke-fixture/upstream-fixture.apk
+            smoke-fixture/*.apk
           retention-days: 7
       - name: Remove signing files
         if: always()
         run: rm -f keystore.properties "$RUNNER_TEMP/college-release.jks"
 
   recorder-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [35, 36]
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -112,7 +122,7 @@ jobs:
       - name: Exercise the release recorder and manual login
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
-          api-level: 36
+          api-level: ${{ matrix.api-level }}
           arch: x86_64
           target: google_apis
           disable-animations: true
@@ -121,7 +131,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: recorder-smoke-results
+          name: recorder-smoke-results-api-${{ matrix.api-level }}
           path: |
             smoke-result.txt
             recorder-logcat.txt
@@ -147,5 +157,5 @@ jobs:
           BUILD_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          printf 'Source commit: %s\n\nBuild and unit-test results: %s\n\nFork now has its own package name to avoid conflicts with original/old builds. Enter credentials once in this new app; disable automatic login in the old app. Back-screen text cross-fade removed and system/keyboard insets handled.\n\nAndroid arm64 APK and Linux CLI ZIP. These are test builds; successful compilation and unit tests do not verify a particular college portal.\n' "$BUILD_SHA" "$RUN_URL" > release-notes.txt
+          printf 'Source commit: %s\n\nBuild and unit-test results: %s\n\nCompatibility build: v1/v2/v3 signatures with the same release key. The regular APK keeps native libraries compressed for a smaller download. The larger -direct.apk loads 16 KB-aligned native libraries directly without installer extraction. Both package formats are exercised on Android 15 and 16. Vivo installation is not yet confirmed; report the full installer error if it still fails. The original UI, back-navigation and inset fixes are retained.\n\nAndroid arm64 APK and Linux CLI ZIP. These are test builds; successful compilation and unit tests do not verify a particular college portal.\n' "$BUILD_SHA" "$RUN_URL" > release-notes.txt
           gh release create "$BUILD_TAG" dist/* --target "$BUILD_SHA" --prerelease --title "College test build $BUILD_TAG" --notes-file release-notes.txt

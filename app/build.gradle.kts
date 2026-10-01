@@ -9,6 +9,12 @@ plugins {
 
 android {
     namespace = "de.binarynoise.captiveportalautologin"
+
+    signingConfigs.configureEach {
+        enableV1Signing = true
+        enableV2Signing = true
+        enableV3Signing = true
+    }
     
     defaultConfig {
         applicationId = "de.binarynoise.captiveportalautologin.college"
@@ -81,7 +87,8 @@ android {
             )
         }
         jniLibs {
-            useLegacyPackaging = true // compress .so files even if they need to be extracted on-device then
+            // The optional direct APK avoids installer extraction of compressed native libraries.
+            useLegacyPackaging = !providers.gradleProperty("directNativeLibraries").isPresent
             keepDebugSymbols += "**/*.so"
         }
     }

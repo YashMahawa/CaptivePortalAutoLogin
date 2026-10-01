@@ -53,3 +53,8 @@ Local tests replicate fresh FortiGate tokens and cookies, redirect chains, accou
 failure text and origin boundaries. Android emulator tests cover actual browser
 JavaScript redirects, HTTP meta refresh login, redirect loops and host rejection.
 They do not verify the live IITJ portal or college credentials.
+
+Saved-profile submission now verifies Wi-Fi internet access directly and ends that
+attempt. It no longer runs a generic portal solver afterwards, which could obscure
+the manual result with an unsupported-portal error. An HTTP success without verified
+internet is reported as unverified and retains the existing bounded automatic retry.

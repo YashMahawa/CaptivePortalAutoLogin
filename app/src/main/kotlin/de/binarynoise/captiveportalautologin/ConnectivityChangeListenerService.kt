@@ -455,7 +455,14 @@ class ConnectivityChangeListenerService : Service() {
                     return
                 }
                 ManualPortalLogin.submit(network, manualProfile, userAgent)
-                reportNetworkConnectivity(network, true)
+                succeeded = WifiInternetCheck.isOnline(network, userAgent)
+                t.cancel()
+                LoginStatus.record(if (succeeded) "Saved-details login completed. Internet access verified on Wi-Fi."
+                    else "Login form submitted, but internet access is not verified yet. Check the portal in Capture for an account error or additional login step.")
+                reportNetworkConnectivity(network, succeeded)
+                // The saved-profile flow already submitted the login. An unrelated generic
+                // handler must not overwrite its result or submit another portal form.
+                return
             }
 
             val liberationResult = Liberator(

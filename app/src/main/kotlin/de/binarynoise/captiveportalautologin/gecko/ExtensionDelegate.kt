@@ -81,6 +81,30 @@ class ExtensionDelegate(
     val onError: (exception: Throwable?) -> Unit,
 ) : WebExtension.MessageDelegate, WebExtension.PortDelegate {
     var port: WebExtension.Port? = null
+    private var privateModeAllowed = false
+    private var captureConfigured = false
+    private var readyNotified = false
+    private var startupFailed = false
+    private val startupTimeout = Runnable {
+        if (!readyNotified && !startupFailed) {
+            startupFailed = true
+            onError(IllegalStateException("Capture extension did not become ready within 30 seconds"))
+        }
+    }
+
+    private fun notifyReady() {
+        if (privateModeAllowed && captureConfigured && !readyNotified && !startupFailed) {
+            readyNotified = true
+            mainHandler.removeCallbacks(startupTimeout)
+            onExtensionLoaded()
+        }
+    }
+
+    private fun startupError(error: Throwable?) {
+        startupFailed = true
+        mainHandler.removeCallbacks(startupTimeout)
+        onError(error)
+    }
     
     // MessageDelegate
     override fun onMessage(nativeApp: String, message: Any, sender: WebExtension.MessageSender): GeckoResult<Any>? {
@@ -118,6 +142,12 @@ class ExtensionDelegate(
     // PortDelegate
     override fun onPortMessage(message: Any, port: WebExtension.Port) {
         if (message is OrgJSONObject) {
+            if (message.optString("event") == "captureReady") {
+                context(lifecycleOwner) {
+                    mainHandler.postIfCreated { captureConfigured = true; notifyReady() }
+                }
+                return
+            }
             backgroundHandler.post {
                 try {
                     handleMessage(message.toJsonObject())
@@ -146,6 +176,7 @@ class ExtensionDelegate(
         
         session.open(runtime)
         geckoView.setSession(session)
+        mainHandler.postDelayed(startupTimeout, 30_000)
         
         try {
             val alwaysReload = true
@@ -155,12 +186,12 @@ class ExtensionDelegate(
                 runtime.webExtensionController.ensureBuiltIn(extensionPath, extensionID)
             }.accept(installed@{ e ->
                 if (e == null) {
-                    onError(IllegalStateException("Capture extension installation returned no extension"))
+                    startupError(IllegalStateException("Capture extension installation returned no extension"))
                     return@installed
                 }
                 runtime.webExtensionController.setAllowedInPrivateBrowsing(e, true).accept(allowed@{ allowed ->
                     if (allowed == null) {
-                        onError(IllegalStateException("Capture extension private mode permission was not granted"))
+                        startupError(IllegalStateException("Capture extension private mode permission was not granted"))
                         return@allowed
                     }
                     extension = allowed
@@ -168,18 +199,21 @@ class ExtensionDelegate(
                         mainHandler.postIfCreated {
                             session.webExtensionController.setMessageDelegate(allowed, this, "browser")
                             allowed.setMessageDelegate(this, "browser")
-                            onExtensionLoaded()
+                            privateModeAllowed = true
+                            notifyReady()
                         }
                     }
-                }, { onError(it) })
+                }, { startupError(it) })
                 
-            }, { onError(it) })
+            }, { startupError(it) })
         } catch (e: Exception) {
-            onError(e)
+            startupError(e)
         }
     }
     
     fun onDestroy(geckoView: GeckoView) {
+        startupFailed = true
+        mainHandler.removeCallbacks(startupTimeout)
         port?.disconnect()
         port?.setDelegate(null)
         port = null

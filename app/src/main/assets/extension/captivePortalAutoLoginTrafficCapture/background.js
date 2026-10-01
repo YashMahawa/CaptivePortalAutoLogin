@@ -26,6 +26,7 @@ port.onMessage.addListener((message) => {
             applyConfig("routeToApp", message);
             applyConfig("stringify", message);
             applyConfig("blockWs", message);
+            port.postMessage({ event: "captureReady" });
             break;
         default:
             console.log("unknown event", message["event"]);

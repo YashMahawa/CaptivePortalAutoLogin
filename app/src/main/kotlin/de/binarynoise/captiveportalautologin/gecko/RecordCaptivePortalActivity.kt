@@ -142,13 +142,6 @@ class RecordCaptivePortalActivity : ComponentActivity() {
         previousBoundNetwork = connectivityManager.boundNetworkForProcess
         boundCaptureNetwork = connectivityManager.bindProcessToNetwork(network)
         
-        if (SharedPreferences.liberator_user_agent.get() == SystemPortalUserAgent) {
-            val userAgent = intent.getStringExtra(
-                "android.net.extra.CAPTIVE_PORTAL_USER_AGENT"
-            )
-            if (userAgent != null) extensionDelegate.session.settings.userAgentOverride = userAgent
-        }
-        
         if (portalTestUrl == SystemPortalTestUrl) {
             // only use android's provided captivePortalUrl if the user hasn't overridden the url in the settings
             val captivePortalUrl =
@@ -161,11 +154,16 @@ class RecordCaptivePortalActivity : ComponentActivity() {
         
         onBackPressedDispatcher.addCallback(onBackPressedCallback)
         
-        extensionDelegate.session.progressDelegate = progressDelegate
-        extensionDelegate.session.scrollDelegate = scrollRefreshDelegate
         try {
-            extensionDelegate.onCreate(binding.geckoView)
+            if (SharedPreferences.liberator_user_agent.get() == SystemPortalUserAgent) {
+                intent.getStringExtra("android.net.extra.CAPTIVE_PORTAL_USER_AGENT")?.let {
+                    extensionDelegate.session.settings.userAgentOverride = it
+                }
+            }
+            extensionDelegate.session.progressDelegate = progressDelegate
+            extensionDelegate.session.scrollDelegate = scrollRefreshDelegate
             browserStarted = true
+            extensionDelegate.onCreate(binding.geckoView)
         } catch (e: Exception) {
             onExtensionDelegateError(e)
         } catch (e: LinkageError) {

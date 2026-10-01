@@ -12,11 +12,15 @@ internal object ManualPortalFlow {
         val direct = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         var current = configured
         if (PortalNavigation.isIitj(configured)) {
-            direct.newCall(Request.Builder().url(PortalNavigation.PROBE).build()).execute().use { response ->
-                if (response.code == 204) return
-                val target = response.header("Location")?.let { response.request.url.resolve(it) }
-                    ?: PortalNavigation.redirect(response.body.string(), response.request.url)
-                if (target != null && PortalNavigation.allowed(target, configured)) current = target
+            try {
+                direct.newCall(Request.Builder().url(PortalNavigation.PROBE).build()).execute().use { response ->
+                    if (response.code == 204) return
+                    val target = response.header("Location")?.let { response.request.url.resolve(it) }
+                        ?: PortalNavigation.redirect(response.body.string(), response.request.url)
+                    if (target != null && PortalNavigation.allowed(target, configured)) current = target
+                }
+            } catch (_: java.io.IOException) {
+                // Some campus networks block the probe host; the saved endpoint still works.
             }
         }
         var form: ManualLoginForm? = null

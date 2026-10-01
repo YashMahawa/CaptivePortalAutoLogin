@@ -133,6 +133,7 @@ dependencies {
     
     debugImplementation(libs.leakcanary.android)
     
+    testImplementation("com.squareup.okhttp3:mockwebserver3:${libs.versions.okhttp.get()}")
     testImplementation(libs.kotlin.test)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.junit.jupiter.params)

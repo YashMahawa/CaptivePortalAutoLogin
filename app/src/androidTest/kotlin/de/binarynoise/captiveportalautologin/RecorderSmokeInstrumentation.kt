@@ -57,7 +57,7 @@ class RecorderSmokeInstrumentation : Instrumentation() {
             result.putString("stream", "Recorder page load, traffic capture, encrypted profile, and manual HTTP login passed.\n")
             resultCode = Activity.RESULT_OK
         } catch (error: Throwable) {
-            result.putString("stream", "SMOKE TEST FAILED: ${error.stackTraceToString()}\n")
+            result.putString("stream", "SMOKE TEST FAILED: ${android.util.Log.getStackTraceString(error)}\n")
 
         } finally {
             activity?.let { recorder -> runOnMainSync { if (!recorder.isFinishing) recorder.finish() } }

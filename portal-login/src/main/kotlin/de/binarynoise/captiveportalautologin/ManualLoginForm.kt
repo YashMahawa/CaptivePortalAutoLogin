@@ -4,7 +4,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.jsoup.Jsoup
 
-internal data class ManualLoginForm(val action: HttpUrl, val fields: List<Pair<String, String>>, val page: HttpUrl) {
+data class ManualLoginForm(val action: HttpUrl, val fields: List<Pair<String, String>>, val page: HttpUrl) {
     companion object {
         fun parse(html: String, page: HttpUrl, configured: HttpUrl, username: String, password: String): ManualLoginForm {
             fun sameOrigin(url: HttpUrl) = url.host == configured.host &&

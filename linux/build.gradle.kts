@@ -7,11 +7,14 @@ plugins {
 }
 
 dependencies {
+    implementation(projects.portalLogin)
     implementation(projects.api.client)
     implementation(projects.liberator)
     implementation(projects.util.logger)
     implementation(libs.clikt)
-    compileOnly(libs.okhttp)
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
+    implementation(libs.okhttp)
 }
 
 val mainClass = "de.binarynoise.captiveportalautologin.MainKt"
@@ -30,3 +33,5 @@ tasks.withType<ShadowJar> {
     }
     exclude("**/*.kotlin_*")
 }
+
+tasks.withType<Test> { useJUnitPlatform() }

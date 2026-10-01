@@ -12,3 +12,5 @@ include(":util:logger")
 include(":util:okhttp-kts")
 include(":util:reflection")
 include(":util:rhino")
+
+include(":portal-login")

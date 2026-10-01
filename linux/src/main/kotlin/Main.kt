@@ -13,6 +13,10 @@ import de.binarynoise.liberator.Liberator
 import de.binarynoise.liberator.PortalDetection
 import de.binarynoise.logger.Logger.log
 import okhttp3.ConnectionPool
+import java.nio.file.Path
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ScheduledFuture
 
 fun main(args: Array<String>) = CaptivePortalAutoLoginLinux().main(args)
 
@@ -25,8 +29,34 @@ class CaptivePortalAutoLoginLinux : CliktCommand() {
     val restartNetworking by option().flag()
         .help { "Restart networking on start. Also available as keyboard shortcut 'r' while running as service" }
     
+    val iitj by option().flag().help { "Use the saved IITJ credential profile" }
+    val configureIitj by option().flag().help { "Save IITJ details with hidden password entry in a terminal" }
+    val profile by option().help { "Private profile file (default ~/.config/captiveportalautologin/iitj.properties)" }
+    val connectionUuid by option().help { "Campus NetworkManager connection UUID to save during configuration" }
+    private val profilePath get() = profile?.let { Path.of(it) } ?: IitjLogin.defaultPath
+    private val retries = Executors.newSingleThreadScheduledExecutor()
+    private var retryTask: ScheduledFuture<*>? = null
+    private var retrySeconds = 60L
+    private var iitjProfile: IitjLogin.Profile? = null
+
     override fun run() {
         require(!(service && oneshot)) { "Use either --service or --oneshot" }
+        if (configureIitj) {
+            require(!iitj && !service && !oneshot && !force) { "Configure separately from login mode" }
+            IitjLogin.configure(profilePath, connectionUuid)
+            return
+        }
+        if (iitj) {
+            iitjProfile = IitjLogin.load(profilePath)
+            if (oneshot || force) {
+                val ok = runCatching { IitjLogin.login(iitjProfile!!) }.getOrElse {
+                    System.err.println("IITJ login failed: ${it.message}"); false
+                }
+                retries.shutdownNow()
+                exitProcess(if (ok) 0 else 1)
+            }
+            require(iitjProfile!!.connection != null) { "Automatic IITJ mode requires a saved connection UUID. Configure with --connection-uuid, or use --iitj --oneshot." }
+        }
         log("CaptivePortalAutoLogin for Linux")
         log("https://github.com/binarynoise/CaptivePortalAutoLogin")
         
@@ -156,7 +186,26 @@ class CaptivePortalAutoLoginLinux : CliktCommand() {
      * 
      * Parses the [connectivity] state and attempts to liberate the user if the state is "portal".
      */
+    @Synchronized
     fun onConnectivityChanged(connectivity: String, oneshot: Boolean = false) {
+        if (iitj) {
+            retryTask?.cancel(false)
+            retryTask = null
+            if (connectivity == "full" || connectivity == "none") { retrySeconds = 60; return }
+            val saved = iitjProfile ?: return
+            val matching = runCatching { saved.connection in IitjLogin.activeConnections() }.getOrDefault(false)
+            if (!matching) { retrySeconds = 60; return }
+            if (connectivity != "portal" && connectivity != "limited" && connectivity != "unknown") return
+            val succeeded = runCatching { IitjLogin.login(saved) }.getOrElse {
+                System.err.println("IITJ login failed: ${it.message}"); false
+            }
+            if (succeeded) retrySeconds = 60 else {
+                println("Retry in $retrySeconds seconds while the saved campus connection remains active.")
+                retryTask = retries.schedule({ onConnectivityChanged("portal") }, retrySeconds, TimeUnit.SECONDS)
+                retrySeconds = (retrySeconds * 2).coerceAtMost(900)
+            }
+            return
+        }
         try {
             log("onConnectivityChanged: $connectivity")
             if (connectivity == "portal") {

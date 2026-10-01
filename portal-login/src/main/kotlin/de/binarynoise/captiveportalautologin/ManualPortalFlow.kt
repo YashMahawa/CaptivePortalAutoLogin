@@ -7,7 +7,7 @@ import okhttp3.Request
 import org.jsoup.Jsoup
 
 /** Cookies and Wi-Fi routing are supplied by the caller. Every attempt fetches a fresh token. */
-internal object ManualPortalFlow {
+object ManualPortalFlow {
     fun submit(client: OkHttpClient, configured: HttpUrl, username: String, password: String) {
         val direct = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         var current = configured

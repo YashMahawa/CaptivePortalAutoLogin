@@ -4,7 +4,7 @@ import okhttp3.HttpUrl
 import org.jsoup.Jsoup
 
 /** Only literal redirects are read; portal JavaScript is never executed by the HTTP client. */
-internal object PortalNavigation {
+object PortalNavigation {
     const val PROBE = "http://gstatic.com/generate_204"
 
     fun isIitj(url: HttpUrl): Boolean = url.scheme == "https" && when (url.host) {

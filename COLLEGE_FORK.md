@@ -58,3 +58,15 @@ Saved-profile submission now verifies Wi-Fi internet access directly and ends th
 attempt. It no longer runs a generic portal solver afterwards, which could obscure
 the manual result with an unsupported-portal error. An HTTP success without verified
 internet is reported as unverified and retains the existing bounded automatic retry.
+
+## Shared IITJ flow and Linux CLI
+
+The Android-tested HTTP form/discovery/certificate policy now lives in the JVM
+`portal-login` module used by both Android and Linux. Linux supports terminal-only
+hidden-password setup, atomic owner-only profile writes, manual headless login and
+NetworkManager connection-scoped automatic retries (60 seconds through 15 minutes).
+Its credential file is plaintext with permissions 600; Android remains Keystore
+encrypted. Linux refuses unsafe file permissions, symbolic-link profiles and
+unapproved portal endpoints. Setup with several active connections requires an
+explicit connection UUID before automatic mode can run. Both clients still require
+a live campus test of today's netaccess form.

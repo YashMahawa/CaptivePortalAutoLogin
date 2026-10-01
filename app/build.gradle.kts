@@ -95,6 +95,7 @@ android {
 }
 
 dependencies {
+    implementation(projects.portalLogin)
     implementation(projects.api.client)
     implementation(projects.liberator)
     implementation(projects.util.fileDB)
@@ -133,7 +134,6 @@ dependencies {
     
     debugImplementation(libs.leakcanary.android)
     
-    testImplementation("com.squareup.okhttp3:mockwebserver3:${libs.versions.okhttp.get()}")
     testImplementation(libs.kotlin.test)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.junit.jupiter.params)

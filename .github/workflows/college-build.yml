@@ -55,7 +55,12 @@ jobs:
       - name: Test and build
         run: |
           chmod +x gradlew
-          ./gradlew :app:testArm64ReleaseUnitTest :app:assembleArm64Release :app:assembleX86_64Release :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
+          ./gradlew :portal-login:test :linux:test :app:testArm64ReleaseUnitTest :app:assembleArm64Release :app:assembleX86_64Release :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
+      - name: Check packaged Linux CLI
+        run: |
+          java -jar linux/build/libs/linux-shadow.jar --help
+          java -jar linux/build/libs/linux-shadow.jar --iitj --oneshot --profile /tmp/missing-profile > /tmp/linux-missing-profile.txt 2>&1 && exit 1 || test "$?" -ne 0
+          grep -q 'Configure an IITJ profile' /tmp/linux-missing-profile.txt
       - name: Validate shipped arm64 APK
         run: python3 scripts/verify-arm64-apk.py app/build/outputs/apk/arm64/release/app-arm64-release.apk ${{ github.event_name != 'pull_request' && '--release' || '' }}
       - name: Build different-signer installation fixture
@@ -84,7 +89,10 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: unit-test-reports
-          path: app/build/reports/tests/testArm64ReleaseUnitTest/
+          path: |
+            app/build/reports/tests/testArm64ReleaseUnitTest/
+            portal-login/build/reports/tests/test/
+            linux/build/reports/tests/test/
           if-no-files-found: ignore
       - name: Upload emulator APKs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

@@ -6,7 +6,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 
 /** Explicit profile opt-in matching the supplied campus script, restricted to two portal endpoints. */
-internal object IitjCertificateException {
+object IitjCertificateException {
     fun apply(builder: OkHttpClient.Builder) {
         val trust = object : X509TrustManager {
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()

@@ -4,8 +4,12 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Bundle
 import de.binarynoise.captiveportalautologin.gecko.RecordCaptivePortalActivity
+import de.binarynoise.captiveportalautologin.preferences.MainActivity
 import org.mozilla.geckoview.GeckoSession
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -17,11 +21,16 @@ class RecorderSmokeInstrumentation : Instrumentation() {
     override fun onStart() {
         val result = Bundle()
         var activity: RecordCaptivePortalActivity? = null
+        var home: Activity? = null
         val previous = ManualPortalProfiles.load()
         var resultCode = Activity.RESULT_CANCELED
         try {
+            home = startActivitySync(Intent(targetContext, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("startService", false))
+            val mainScreen = home
+            runOnMainSync { check(!mainScreen.isFinishing) { "Main screen closed at startup" } }
             val manager = targetContext.getSystemService(ConnectivityManager::class.java)
-            val network = checkNotNull(manager.activeNetwork) { "Emulator has no network" }
+            val network = awaitWifi(manager)
             val profile = ManualPortalProfile("http://10.0.2.2:8765/login", "smoke-user", "smoke-password", null)
             ManualPortalProfiles.save(profile)
             check(ManualPortalProfiles.load() == profile) { "Encrypted credential round trip failed" }
@@ -61,8 +70,29 @@ class RecorderSmokeInstrumentation : Instrumentation() {
 
         } finally {
             activity?.let { recorder -> runOnMainSync { if (!recorder.isFinishing) recorder.finish() } }
+            home?.let { mainScreen -> runOnMainSync { if (!mainScreen.isFinishing) mainScreen.finish() } }
             if (previous == null) ManualPortalProfiles.clear() else ManualPortalProfiles.save(previous)
         }
         finish(resultCode, result)
+    }
+
+    private fun awaitWifi(manager: ConnectivityManager): Network {
+        val ready = CountDownLatch(1)
+        var selected: Network? = null
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                    selected = network
+                    ready.countDown()
+                }
+            }
+        }
+        manager.registerNetworkCallback(NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), callback)
+        try {
+            check(ready.await(45, TimeUnit.SECONDS)) { "Emulator Wi-Fi did not become validated" }
+            return checkNotNull(selected)
+        } finally { manager.unregisterNetworkCallback(callback) }
     }
 }

@@ -11,8 +11,11 @@ a = p.parse_args()
 def run(tool, *args):
     return subprocess.check_output([str(a.tools / tool), *args, str(a.apk)], text=True)
 signing = run('apksigner', 'verify', '--verbose', '--print-certs', '--min-sdk-version', '26', '--max-sdk-version', '36')
-for scheme, description in [('v1', 'JAR signing'), ('v2', 'APK Signature Scheme v2'), ('v3', 'APK Signature Scheme v3')]:
-    assert f'Verified using {scheme} scheme ({description}): true' in signing, f'Missing {scheme} signature'
+# apksigner only reports schemes used by the requested Android versions.
+# Exercise each scheme in its own SDK range, including v1 below Android 7.
+for scheme, description, low, high in [('v1', 'JAR signing', 23, 23), ('v2', 'APK Signature Scheme v2', 26, 27), ('v3', 'APK Signature Scheme v3', 28, 36)]:
+    verification = run('apksigner', 'verify', '--verbose', '--min-sdk-version', str(low), '--max-sdk-version', str(high))
+    assert f'Verified using {scheme} scheme ({description}): true' in verification, f'Missing {scheme} signature'
 if a.release:
     assert '56bc9ac6d51eaa649763076430d18b6db68facb42a43921f6cdc67679a4ab661' in signing, 'Unexpected release signer'
 run('zipalign', '-P', '16', '-c', '4')

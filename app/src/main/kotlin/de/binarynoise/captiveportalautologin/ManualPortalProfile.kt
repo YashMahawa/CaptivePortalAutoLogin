@@ -12,7 +12,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class ManualPortalProfile(val url: String, val username: String, val password: String, val automaticSsid: String?)
+data class ManualPortalProfile(val url: String, val username: String, val password: String, val automaticSsid: String?, val allowIitjCertificate: Boolean = false)
 
 object ManualPortalProfiles {
     private const val ALIAS = "captive.portal.manual.profile"
@@ -32,6 +32,7 @@ object ManualPortalProfiles {
     fun save(profile: ManualPortalProfile) {
         val json = JSONObject().put("url", profile.url).put("username", profile.username)
             .put("password", profile.password).put("ssid", profile.automaticSsid ?: JSONObject.NULL)
+            .put("allowIitjCertificate", profile.allowIitjCertificate)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         val payload = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
             Base64.encodeToString(cipher.doFinal(json.toString().toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
@@ -46,7 +47,7 @@ object ManualPortalProfiles {
             }
             val json = JSONObject(String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8))
             ManualPortalProfile(json.getString("url"), json.getString("username"), json.getString("password"),
-                if (json.isNull("ssid")) null else json.getString("ssid"))
+                if (json.isNull("ssid")) null else json.getString("ssid"), json.optBoolean("allowIitjCertificate", false))
         }.getOrNull()
     }
     fun clear() { prefs.edit().remove("profile").apply() }

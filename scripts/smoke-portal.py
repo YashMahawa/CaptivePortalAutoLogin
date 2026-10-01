@@ -6,7 +6,16 @@ from urllib.parse import parse_qs
 
 class Portal(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = b'''<!doctype html><title>Recorder test login</title>
+        if self.path == "/redirect":
+            body = b'<script>window.location="/login";</script>'
+        elif self.path == "/meta":
+            body = b'<meta http-equiv="refresh" content="0; URL=/login">'
+        elif self.path == "/loop":
+            body = b'<script>location="/loop";</script>'
+        elif self.path == "/blocked":
+            body = b'<script>location="https://evil.test/login";</script>'
+        else:
+            body = b'''<!doctype html><title>Recorder test login</title>
         <form action="/submit" method="post">
         <input type="hidden" name="csrf" value="fresh-token">
         <input name="username" autocomplete="username">

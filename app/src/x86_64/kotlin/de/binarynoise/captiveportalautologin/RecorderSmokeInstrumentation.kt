@@ -73,7 +73,7 @@ class RecorderSmokeInstrumentation : Instrumentation() {
             }
             val manager = targetContext.getSystemService(ConnectivityManager::class.java)
             val network = awaitWifi(manager)
-            val profile = ManualPortalProfile(portalUrl, "smoke-user", "smoke-password", null)
+            val profile = ManualPortalProfile(portalUrl.replace("/login", "/redirect"), "smoke-user", "smoke-password", null)
             ManualPortalProfiles.save(profile)
             check(ManualPortalProfiles.load() == profile) { "Encrypted credential round trip failed" }
             activity = startActivitySync(Intent(targetContext, RecordCaptivePortalActivity::class.java)
@@ -98,6 +98,11 @@ class RecorderSmokeInstrumentation : Instrumentation() {
             runOnMainSync { recorder.finish() }
             waitForIdleSync()
             ManualPortalLogin.submit(network, profile, "CaptivePortalSmokeTest")
+            ManualPortalLogin.submit(network, profile.copy(url = portalUrl.replace("/login", "/meta")), "CaptivePortalSmokeTest")
+            for (path in listOf("/loop", "/blocked")) {
+                val failure = runCatching { ManualPortalLogin.submit(network, profile.copy(url = portalUrl.replace("/login", path)), "CaptivePortalSmokeTest") }.exceptionOrNull()
+                check(failure is IllegalArgumentException || failure is IllegalStateException) { "Unsafe or looping redirect was followed" }
+            }
             result.putString("stream", "Recorder page load, traffic capture, encrypted profile, and manual HTTP login passed.\n")
             result.putString("ui", "Back navigation, gesture-bar/cutout and keyboard inset regression checks passed.")
             resultCode = Activity.RESULT_OK

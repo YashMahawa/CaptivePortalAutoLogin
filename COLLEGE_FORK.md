@@ -30,3 +30,26 @@ The Linux ZIP contains the original Java CLI. It does not include the Android cr
 ## Installer compatibility investigation
 
 The Vivo T2 5G on Android 15 rejected build 12 even with a separate package name. The full installer error is still needed; signature and ELF validation did not reproduce this phone-specific rejection. Releases now explicitly include v1/v2/v3 signatures using the same durable key. A larger optional `-direct.apk` stores aligned native libraries uncompressed with `extractNativeLibs=false`, so installation does not need to extract Gecko’s compressed libraries. The usual APK remains compressed. CI exercises installation/update, recorder and manual login for both packaging formats on Android 15 and 16. These changes are compatibility probes, not proof that the Vivo issue is fixed.
+
+## IITJ flow investigation (uploaded Internet.py)
+
+The supplied server helper discovers a literal JavaScript redirect from HTTP gstatic,
+fetches `https://gateway.iitj.ac.in:1003/fgtauth?<fresh token>`, then submits
+`magic`, `4Tredir`, username and password. It disables TLS certificate verification.
+The reported current URL is `https://netaccess.iitj.ac.in/24online/servlet/E24onlineHTTPClient`;
+its live form has not been inspected and may differ from that older FortiGate flow.
+
+Saved IITJ profiles now perform a fresh probe each attempt, follow bounded HTTP,
+literal script and meta refresh redirects, preserve cookies and form fields, and
+report the two authentication failures recognized by the supplied script. The
+4Tredir POST target is used only if it is one of the two explicitly allowed IITJ
+HTTPS endpoints; external return URLs remain hidden form fields. Credentials are
+never forwarded by POST redirects. A profile opt-in allows campus certificate
+exceptions only for these two endpoints and ports. The recorder exposes network
+and certificate load failures in an error page with retry and an explicit temporary
+certificate exception button, instead of silently halting to a blank page.
+
+Local tests replicate fresh FortiGate tokens and cookies, redirect chains, account
+failure text and origin boundaries. Android emulator tests cover actual browser
+JavaScript redirects, HTTP meta refresh login, redirect loops and host rejection.
+They do not verify the live IITJ portal or college credentials.

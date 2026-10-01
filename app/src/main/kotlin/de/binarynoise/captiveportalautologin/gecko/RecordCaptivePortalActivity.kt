@@ -15,6 +15,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.view.View
+import android.net.Uri
+import android.text.TextUtils
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -45,6 +47,9 @@ import de.binarynoise.logger.Logger.log
 import de.binarynoise.reflection.invokeHiddenMethod
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.WebRequestError
+import de.binarynoise.captiveportalautologin.PortalNavigation
 
 class RecordCaptivePortalActivity : ComponentActivity() {
     @get:UiThread
@@ -76,6 +81,23 @@ class RecordCaptivePortalActivity : ComponentActivity() {
             reevaluateNetwork()
         }
         
+        override fun onLoadError(session: GeckoSession, uri: String?, error: WebRequestError): GeckoResult<String> {
+            binding.progress.isVisible = false
+            binding.swipeRefresh.isRefreshing = false
+            val failed = uri?.toHttpUrlOrNull()
+            val endpoint = failed?.let { "${it.host}${it.encodedPath}" } ?: "portal"
+            val message = "Could not load $endpoint (browser error ${error.code}, category ${error.category})."
+            LoginStatus.record(message)
+            val certificate = error.category == WebRequestError.ERROR_CATEGORY_SECURITY &&
+                failed?.let { PortalNavigation.isIitj(it) } == true
+            val allowed = certificate && ManualPortalProfiles.load()?.allowIitjCertificate == true
+            val explanation = if (certificate) "The campus certificate could not be verified. Enable the IITJ certificate exception in Manual login only if you trust this campus network, then retry." else
+                "Check the portal URL and your Wi-Fi connection. Pull down to retry."
+            val exceptionButton = if (allowed) """<button onclick="document.addCertException(true).then(()=>location.reload()).catch(()=>document.getElementById('detail').textContent='Certificate exception unavailable for this site')">Continue with temporary IITJ certificate exception</button>""" else ""
+            val html = """<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Portal load failed</title><style>body{font:16px sans-serif;padding:24px;overflow-wrap:anywhere}button{padding:12px;margin:8px 0}</style><h2>Portal load failed</h2><p>${TextUtils.htmlEncode(message)}</p><p id="detail">${TextUtils.htmlEncode(explanation)}</p><button onclick="location.reload()">Retry</button><br>$exceptionButton"""
+            return GeckoResult.fromValue("data:text/html;charset=utf-8," + Uri.encode(html))
+        }
+
         override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
             onBackPressedCallback.isEnabled = canGoBack
         }
@@ -210,7 +232,13 @@ class RecordCaptivePortalActivity : ComponentActivity() {
     }
     
     fun onExtensionLoaded() {
-        extensionDelegate.session.loadUri(ManualPortalProfiles.load()?.url ?: portalTestUrl.httpUrl.toString())
+        val profile = ManualPortalProfiles.load()
+        val saved = profile?.url?.toHttpUrlOrNull()
+        val validated = connectivityManager.getNetworkCapabilities(network)?.hasCapability(NET_CAPABILITY_VALIDATED) == true
+        // IITJ gateway tokens are per connection: let the browser discover a fresh redirect.
+        val start = if (saved != null && PortalNavigation.isIitj(saved) && !validated) PortalNavigation.PROBE
+            else profile?.url ?: portalTestUrl.httpUrl.toString()
+        extensionDelegate.session.loadUri(start)
         binding.swipeRefresh.isEnabled = true
         LoginStatus.record("Recorder ready. Complete the login in the browser; capture is for diagnosing this portal, not automatic macro replay.")
     }

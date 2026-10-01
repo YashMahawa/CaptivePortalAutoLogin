@@ -59,7 +59,7 @@ class ManualLoginFragment : AutoCleanupPreferenceFragment() {
             preferenceScreen.addPreference(p)
             return p
         }
-        val url = field("Portal URL", profile?.url)
+        val url = field("Portal URL", profile?.url ?: "https://netaccess.iitj.ac.in/24online/servlet/E24onlineHTTPClient")
         val username = field("Username", profile?.username)
         val password = field("Password", profile?.password, true)
         val automatic = SwitchPreference(ctx).apply {
@@ -69,6 +69,13 @@ class ManualLoginFragment : AutoCleanupPreferenceFragment() {
             isChecked = profile?.automaticSsid != null
         }
         preferenceScreen.addPreference(automatic)
+        val certificate = SwitchPreference(ctx).apply {
+            title = "Allow IITJ portal certificate exception"
+            summary = "Only gateway.iitj.ac.in:1003 and netaccess.iitj.ac.in over HTTPS. Use if the campus certificate fails validation; this cannot verify the server's identity."
+            isPersistent = false
+            isChecked = profile?.allowIitjCertificate == true
+        }
+        preferenceScreen.addPreference(certificate)
         fun save(): Boolean = try {
             val parsed = url.text?.trim()?.toHttpUrlOrNull() ?: error("Enter a valid http(s) portal URL")
             require(parsed.username.isEmpty() && parsed.password.isEmpty()) { "Put credentials in the username and password fields, not the URL" }
@@ -76,7 +83,7 @@ class ManualLoginFragment : AutoCleanupPreferenceFragment() {
             val ssid = if (automatic.isChecked) ConnectivityChangeListenerService.networkStateLock.read {
                 ConnectivityChangeListenerService.networkState?.ssid?.takeUnless { it == ConnectivityChangeListenerService.SsidCompat.UNKNOWN_SSID }
             } ?: error("Connect to your Wi-Fi with location permission before enabling automatic login") else null
-            ManualPortalProfiles.save(ManualPortalProfile(parsed.toString(), username.text!!, password.text!!, ssid))
+            ManualPortalProfiles.save(ManualPortalProfile(parsed.toString(), username.text!!, password.text!!, ssid, certificate.isChecked))
             password.summary = "Saved securely"
             true
         } catch (e: Exception) {
@@ -90,12 +97,12 @@ class ManualLoginFragment : AutoCleanupPreferenceFragment() {
         })
         preferenceScreen.addPreference(Preference(ctx).apply {
             title = "Log in now"
-            summary = "Save and submit the standard username/password form, then ask Android to verify internet access."
+            summary = "Discover the IITJ portal or submit the saved login form, then ask Android to verify internet access."
             setOnPreferenceClickListener { if (save()) ConnectivityChangeListenerService.retry(); true }
         })
         preferenceScreen.addPreference(Preference(ctx).apply {
             title = "Forget saved details"
-            setOnPreferenceClickListener { ManualPortalProfiles.clear(); password.text = ""; password.summary = "Not set"; automatic.isChecked = false; true }
+            setOnPreferenceClickListener { ManualPortalProfiles.clear(); password.text = ""; password.summary = "Not set"; automatic.isChecked = false; certificate.isChecked = false; true }
         })
         preferenceScreen.addLoginStatusPreference(this)
     }

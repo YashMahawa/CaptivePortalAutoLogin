@@ -355,7 +355,10 @@ class ConnectivityChangeListenerService : Service() {
         }
         if (!hasPortal) return
         
-        if (!automaticEnabled(ssid ?: SsidCompat.UNKNOWN_SSID)) {
+        val effectiveSsid = networkStateLock.read {
+            networkState?.takeIf { it.network == network }?.ssid
+        } ?: ssid ?: SsidCompat.UNKNOWN_SSID
+        if (!automaticEnabled(effectiveSsid)) {
             log("not liberating automatically")
             LoginStatus.record("Portal detected, but automatic login is off. Enable automatic login or saved details for this Wi-Fi.")
             return

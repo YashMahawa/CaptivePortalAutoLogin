@@ -41,7 +41,7 @@ internal object IitjLogin {
 
     fun load(path: Path): Profile {
         require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "Configure an IITJ profile first with --configure-iitj" }
-        require(Files.getPosixFilePermissions(path) == ownerOnly) { "Credential file must have permissions 600: chmod 600 '${path.fileName}'" }
+        require(Files.getPosixFilePermissions(path) == ownerOnly) { "Credential file must have permissions 600" }
         val props = Properties().apply { Files.newInputStream(path).use { load(it) } }
         val profile = Profile(props.getProperty("url", ""), props.getProperty("username", ""), props.getProperty("password", ""),
             props.getProperty("certificateException", "false") == "true", props.getProperty("connectionUuid")?.takeIf { it.isNotBlank() })
@@ -51,10 +51,12 @@ internal object IitjLogin {
     }
 
     fun activeConnections(): Set<String> {
-        val process = ProcessBuilder("nmcli", "-t", "-f", "UUID", "connection", "show", "--active").start()
+        val process = ProcessBuilder("nmcli", "-t", "-f", "UUID,TYPE", "connection", "show", "--active").start()
         check(process.waitFor(5, TimeUnit.SECONDS)) { process.destroyForcibly(); "NetworkManager query timed out" }
         check(process.exitValue() == 0) { "NetworkManager query failed" }
-        return process.inputStream.bufferedReader().readLines().filter { it.isNotBlank() }.toSet()
+        return process.inputStream.bufferedReader().readLines().map { it.split(':', limit = 2) }
+            .filter { it.size == 2 && it[1] in setOf("802-3-ethernet", "ethernet", "802-11-wireless", "wifi", "bridge", "bond", "vlan") }
+            .map { it[0] }.toSet()
     }
 
     fun configure(path: Path, connection: String?) {
@@ -99,6 +101,10 @@ internal object IitjLogin {
         try {
             ManualPortalFlow.submit(client, profile.url.toHttpUrl(), profile.username, profile.password)
             val verified = online()
+            if (verified) runCatching {
+                val process = ProcessBuilder("nmcli", "networking", "connectivity", "check").start()
+                if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly()
+            }
             println(if (verified) "Login completed. Internet access verified." else "Login submitted, but internet access is not verified. The portal may require an additional step.")
             return verified
         } finally { client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }

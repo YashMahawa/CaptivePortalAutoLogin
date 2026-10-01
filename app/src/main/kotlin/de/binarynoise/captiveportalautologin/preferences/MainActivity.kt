@@ -10,6 +10,7 @@ import de.binarynoise.captiveportalautologin.BuildConfig
 import de.binarynoise.captiveportalautologin.ConnectivityChangeListenerService
 import de.binarynoise.captiveportalautologin.Permissions
 import de.binarynoise.captiveportalautologin.R
+import de.binarynoise.captiveportalautologin.util.applySystemInsets
 import de.binarynoise.captiveportalautologin.preferences.onboarding.WelcomeFragment
 
 const val EXTRA_START_SERVICE = "startService"
@@ -19,6 +20,7 @@ class MainActivity : FragmentActivity(), PreferenceFragmentCompat.OnPreferenceSt
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_fragment_container)
+        findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0).applySystemInsets()
         
         if (savedInstanceState == null) {
             supportFragmentManager.commit {
@@ -76,5 +78,6 @@ class MainActivity : FragmentActivity(), PreferenceFragmentCompat.OnPreferenceSt
 }
 
 fun FragmentTransaction.fillInAnimation() {
-    setTransition(FragmentTransaction.TRANSIT_FRAGMENT_FADE)
+    // Cross-fading transparent preference pages overlays both screens' text on back.
+    setTransition(FragmentTransaction.TRANSIT_NONE)
 }

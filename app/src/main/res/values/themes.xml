@@ -10,7 +10,8 @@
     </style>
     
     <style name="CaptivePortalAutoLogin.Edge2EdgeFix">
-        <item name="android:fitsSystemWindows">true</item>
+        <item name="android:fitsSystemWindows">false</item>
+        <item name="android:background">?android:attr/colorBackground</item>
     </style>
 
 </resources>

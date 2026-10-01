@@ -11,6 +11,7 @@ android {
     namespace = "de.binarynoise.captiveportalautologin"
     
     defaultConfig {
+        applicationId = "de.binarynoise.captiveportalautologin.college"
         minSdk = 26
         resourceConfigurations.addAll(listOf("en", "hi"))
         versionCode = (versionCode ?: 1) + 1

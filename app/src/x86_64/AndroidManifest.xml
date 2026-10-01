@@ -3,5 +3,5 @@
     <!-- The smoke runner is compiled with R8 in the emulator-only APK. -->
     <instrumentation
         android:name="de.binarynoise.captiveportalautologin.RecorderSmokeInstrumentation"
-        android:targetPackage="de.binarynoise.captiveportalautologin" />
+        android:targetPackage="${applicationId}" />
 </manifest>

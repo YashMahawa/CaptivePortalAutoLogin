@@ -56,6 +56,10 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:testArm64ReleaseUnitTest :app:assembleArm64Release :app:assembleX86_64Release :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
+      - name: Validate shipped arm64 APK
+        run: python3 scripts/verify-arm64-apk.py app/build/outputs/apk/arm64/release/app-arm64-release.apk ${{ github.event_name != 'pull_request' && '--release' || '' }}
+      - name: Build different-signer installation fixture
+        run: bash scripts/build-install-fixture.sh
       - name: Package downloads
         run: |
           mkdir -p dist
@@ -81,6 +85,7 @@ jobs:
           name: emulator-apks
           path: |
             app/build/outputs/apk/x86_64/release/*.apk
+            smoke-fixture/upstream-fixture.apk
           retention-days: 7
       - name: Remove signing files
         if: always()
@@ -107,7 +112,7 @@ jobs:
       - name: Exercise the release recorder and manual login
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
-          api-level: 35
+          api-level: 36
           arch: x86_64
           target: google_apis
           disable-animations: true
@@ -142,5 +147,5 @@ jobs:
           BUILD_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          printf 'Source commit: %s\n\nBuild and unit-test results: %s\n\nAndroid arm64 APK and Linux CLI ZIP. These are test builds; successful compilation and unit tests do not verify a particular college portal.\n' "$BUILD_SHA" "$RUN_URL" > release-notes.txt
+          printf 'Source commit: %s\n\nBuild and unit-test results: %s\n\nFork now has its own package name to avoid conflicts with original/old builds. Enter credentials once in this new app; disable automatic login in the old app. Back-screen text cross-fade removed and system/keyboard insets handled.\n\nAndroid arm64 APK and Linux CLI ZIP. These are test builds; successful compilation and unit tests do not verify a particular college portal.\n' "$BUILD_SHA" "$RUN_URL" > release-notes.txt
           gh release create "$BUILD_TAG" dist/* --target "$BUILD_SHA" --prerelease --title "College test build $BUILD_TAG" --notes-file release-notes.txt

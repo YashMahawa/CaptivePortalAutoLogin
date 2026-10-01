@@ -6,11 +6,13 @@ The original settings interface and Gecko recorder are retained. The previous de
 
 ## Builds and signing
 
-Every push to `main` runs Android unit tests and builds a release arm64-v8a APK plus a separate Linux CLI ZIP on a GitHub-hosted runner. Publication also requires an Android 15 emulator check that loads a synthetic portal in the actual Gecko recorder, verifies traffic capture, round-trips encrypted credentials and submits a fresh login form with cookies, Origin and Referer. The smoke runner exists only in the emulator APK, not the delivered arm64 APK. Successful builds publish test-build releases with SHA256 checksums. Pull requests build and test without access to the release signing secrets.
+Every push to `main` runs Android unit tests and builds a release arm64-v8a APK plus a separate Linux CLI ZIP on a GitHub-hosted runner. Publication also requires an Android 16 emulator check that loads a synthetic portal in the actual Gecko recorder, verifies traffic capture, round-trips encrypted credentials and submits a fresh login form with cookies, Origin and Referer. The smoke runner exists only in the emulator APK, not the delivered arm64 APK. Successful builds publish test-build releases with SHA256 checksums. Pull requests build and test without access to the release signing secrets.
 
 The signing keystore and its passwords are GitHub Actions repository secrets. The GitHub personal access token is never committed and is not supplied to Actions. Actions uses its short-lived `GITHUB_TOKEN` for release publication.
 
-The temporary debug signing key used for the earlier APK was lost when the build environment reset. The first APK signed with the durable fork key requires uninstalling the earlier clone and entering its credentials again. Later fork builds use the same key and increasing version codes.
+The temporary debug signing key used for the earlier APK was lost when the build environment reset. Builds now use `de.binarynoise.captiveportalautologin.college`, separate from the original package. This avoids different-signer installation conflicts without uninstalling the original or old debug build. Enter credentials once in the new fork and disable the old app’s automatic service. Later fork builds use the same durable key and increasing version codes. CI installs an unrelated-signer original-package fixture before installing/updating the fork, and validates the shipped arm64 signature, ZIP and 16 KB ELF alignment.
+
+The UI keeps the original settings appearance. Fragment text no longer cross-fades during back navigation; root containers handle system bars, display cutouts, mandatory gesture and keyboard insets without accumulating padding.
 
 ## Login behavior and verification limits
 

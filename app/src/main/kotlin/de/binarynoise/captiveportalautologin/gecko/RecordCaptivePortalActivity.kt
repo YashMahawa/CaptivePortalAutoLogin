@@ -29,6 +29,7 @@ import de.binarynoise.captiveportalautologin.ConnectivityChangeListenerService.C
 import de.binarynoise.captiveportalautologin.ConnectivityChangeListenerService.Companion.networkState
 import de.binarynoise.captiveportalautologin.ConnectivityChangeListenerService.Companion.networkStateLock
 import de.binarynoise.captiveportalautologin.R
+import de.binarynoise.captiveportalautologin.util.applySystemInsets
 import de.binarynoise.captiveportalautologin.LoginStatus
 import de.binarynoise.captiveportalautologin.ManualPortalProfiles
 import de.binarynoise.captiveportalautologin.ScheduledApiClient
@@ -125,6 +126,7 @@ class RecordCaptivePortalActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(binding.root)
+        binding.root.applySystemInsets()
         binding.swipeRefresh.isEnabled = false
         
         captivePortal = IntentCompat.getParcelableExtra(intent, EXTRA_CAPTIVE_PORTAL, CaptivePortal::class.java)

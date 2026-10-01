@@ -313,10 +313,12 @@ class ConnectivityChangeListenerService : Service() {
                 updateNetworkState(network, networkCapabilities)
             }
             
-            override fun onLost(network: Network) = networkStateLock.write {
-                log("onUnavailable: $network")
-                val oldState = networkState
-                if (oldState?.network == network) networkState = null
+            override fun onLost(network: Network) {
+                networkStateLock.write {
+                    log("onUnavailable: $network")
+                    val oldState = networkState
+                    if (oldState?.network == network) networkState = null
+                }
                 backgroundHandler.post { if (retryNetwork == network) cancelAutomaticRetry() }
             }
         }

@@ -18,7 +18,6 @@ android {
         //noinspection EditedTargetSdkVersion
         targetSdk = 36
         multiDexEnabled = true
-        testInstrumentationRunner = "de.binarynoise.captiveportalautologin.RecorderSmokeInstrumentation"
         
         proguardFiles(decoroutinatorAndroidProGuardRules())
         
@@ -33,7 +32,6 @@ android {
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
     }
-    testBuildType = "release"
     
     buildFeatures {
         buildConfig = true

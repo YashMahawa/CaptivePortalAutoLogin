@@ -55,7 +55,7 @@ jobs:
       - name: Test and build
         run: |
           chmod +x gradlew
-          ./gradlew :app:testArm64ReleaseUnitTest :app:assembleArm64Release :app:assembleX86_64Release :app:assembleX86_64ReleaseAndroidTest :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
+          ./gradlew :app:testArm64ReleaseUnitTest :app:assembleArm64Release :app:assembleX86_64Release :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
       - name: Package downloads
         run: |
           mkdir -p dist
@@ -81,7 +81,6 @@ jobs:
           name: emulator-apks
           path: |
             app/build/outputs/apk/x86_64/release/*.apk
-            app/build/outputs/apk/androidTest/x86_64/release/*.apk
           retention-days: 7
       - name: Remove signing files
         if: always()

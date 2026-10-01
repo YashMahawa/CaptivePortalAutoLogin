@@ -10,6 +10,7 @@ import android.net.NetworkRequest
 import android.os.Bundle
 import de.binarynoise.captiveportalautologin.gecko.RecordCaptivePortalActivity
 import de.binarynoise.captiveportalautologin.preferences.MainActivity
+import de.binarynoise.captiveportalautologin.preferences.SystemPortalTestUrl
 import org.mozilla.geckoview.GeckoSession
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -61,11 +62,15 @@ class RecorderSmokeInstrumentation : Instrumentation() {
             check(loaded.await(120, TimeUnit.SECONDS)) { "Recorder did not load the portal page" }
             runOnMainSync { check(!recorder.isFinishing && !recorder.isDestroyed) { "Validated network dismissed the recorder" } }
             val captured = CountDownLatch(1)
-            recorder.backgroundHandler.post {
-                val har = recorder.createFinalizedHar().second
-                if (har.log.entries.any { it.request.url.startsWith(profile.url) }) captured.countDown()
-            }
-            check(captured.await(15, TimeUnit.SECONDS)) { "Private browser extension did not capture the page request" }
+            val captureDeadline = android.os.SystemClock.uptimeMillis() + 15_000
+            recorder.backgroundHandler.post(object : Runnable {
+                override fun run() {
+                    val har = recorder.extensionDelegate.createFinalizedHar("Smoke", SystemPortalTestUrl, allowEdits = true).second
+                    if (har.log.entries.any { it.request.url.startsWith(profile.url) }) captured.countDown()
+                    else if (android.os.SystemClock.uptimeMillis() < captureDeadline) recorder.backgroundHandler.postDelayed(this, 100)
+                }
+            })
+            check(captured.await(20, TimeUnit.SECONDS)) { "Private browser extension did not capture the page request" }
             runOnMainSync { recorder.finish() }
             waitForIdleSync()
             ManualPortalLogin.submit(network, profile, "CaptivePortalSmokeTest")

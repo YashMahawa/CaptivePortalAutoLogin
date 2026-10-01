@@ -55,7 +55,7 @@ jobs:
       - name: Test and build
         run: |
           chmod +x gradlew
-          ./gradlew :app:testArm64ReleaseUnitTest :app:assembleArm64Release :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
+          ./gradlew :app:testArm64ReleaseUnitTest :app:assembleArm64Release :app:assembleX86_64Release :app:assembleX86_64ReleaseAndroidTest :linux:shadowJar --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Pkotlin.compiler.execution.strategy=in-process
       - name: Package downloads
         run: |
           mkdir -p dist
@@ -75,13 +75,58 @@ jobs:
           name: unit-test-reports
           path: app/build/reports/tests/testArm64ReleaseUnitTest/
           if-no-files-found: ignore
+      - name: Upload emulator APKs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: emulator-apks
+          path: |
+            app/build/outputs/apk/x86_64/release/*.apk
+            app/build/outputs/apk/androidTest/x86_64/release/*.apk
+          retention-days: 7
       - name: Remove signing files
         if: always()
         run: rm -f keystore.properties "$RUNNER_TEMP/college-release.jks"
 
+  recorder-smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: emulator-apks
+          path: emulator-download
+      - name: Prepare emulator and local portal
+        run: |
+          sudo chmod 666 /dev/kvm
+          mkdir -p smoke-apks
+          find emulator-download -name '*.apk' -exec cp {} smoke-apks/ \;
+          python3 scripts/smoke-portal.py > portal-fixture.log 2>&1 &
+      - name: Exercise the release recorder and manual login
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: bash scripts/run-recorder-smoke.sh
+      - name: Upload emulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: recorder-smoke-results
+          path: |
+            smoke-result.txt
+            recorder-logcat.txt
+            portal-fixture.log
+          if-no-files-found: ignore
+
   release:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, recorder-smoke]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
